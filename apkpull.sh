@@ -30,7 +30,7 @@ declare -A buttons_he=( ["cancel"]="ביטול" ["install"]="התקנה" ["hardw
 shopt -s extglob
 tmp_file=$(mktemp)
 function split() { aapt d badging ${1} 2>/dev/null | grep -Po "split='\K[^']*"; }
-function error() { echo -e "${r}ERROR: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3}; true; }
+function error() { echo -e "${r}ERROR: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function print() { echo -e ">> ${1}${2}${e}"; }
 function is_device_connected() { [[ $(adb -s ${device_id} get-state 2>/dev/null) == "device" ]]; }
 function is_still_connected() { is_device_connected || error ${r} "Device ${y}${device_model}${r} disconnected!"; };
@@ -52,10 +52,10 @@ elif [[ $(curl --connect-timeout 0.5 -s -o /dev/null -w "%{http_code}" "https://
     error ${r} "This app doesn't exists in Google Play." 1
 elif ! command -v adb >/dev/null 2>&1; then
     error ${r} "Unable to find ADB, please install or add to PATH." 1
-elif [[ $(adb devices -l | sed 's/List\|\s\+.*//g' | wc -l) < 1 ]]; then
+elif [[ $(adb devices -l | sed '/List.*\|^$/d; s/\s.*//g' | wc -l) < 1 ]]; then
     error ${r} "No devices found! At least one device must be connected" 1
 else
-    devices=$(adb devices -l | sed 's/List\|\s\+.*//g')
+    devices=$(adb devices -l | sed '/List.*\|^$/d; s/\s.*//g')
     print ${g} "$(echo ${devices} | sed 's/\s/\n/g' | wc -l) devices connected!"
 fi
 
