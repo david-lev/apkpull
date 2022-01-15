@@ -6,6 +6,9 @@
 # Usage: apkpull.sh [package-name]; Optionals: [-x or debug] | Created with ❤️ by David Lev            #
 #######################################################################################################
 
+# TODO
+# google account
+
 e='\e[0m'; r='\e[31m'; g='\e[32m'
 y='\e[33m'; b='\e[34m'; p='\e[35m'
 echo -e "
@@ -24,25 +27,34 @@ trap "echo; echo 'Exiting from apkpull proccess...'; exit 1" INT
 pkg=${1}
 as="adb shell"
 gp="com.android.vending"
+logs="/tmp/apkpull_log"
 langs="en he"
-declare -A buttons_en=( ["cancel"]="Cancel" ["install"]="Install" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." )
-declare -A buttons_he=( ["cancel"]="ביטול" ["install"]="התקנה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." )
+coins="₪|$"
+allowd_rounds=5
+declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["update"]="Update" ["cancel"]="Cancel" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
+declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["update"]="עדכן" ["cancel"]="ביטול" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
 shopt -s extglob
 tmp_file=$(mktemp)
 function split() { aapt d badging ${1} 2>/dev/null | grep -Po "split='\K[^']*"; }
-function error() { echo -e "${r}ERROR: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
+function error() { echo -e ">> ${r}ERROR: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function print() { echo -e ">> ${1}${2}${e}"; }
 function is_device_connected() { [[ $(adb -s ${device_id} get-state 2>/dev/null) == "device" ]]; }
 function is_still_connected() { is_device_connected || error ${r} "Device ${y}${device_model}${r} disconnected!"; };
 function is_installed() { ${as} pm path ${1} &>/dev/null; }
 function is_disabled() { ${as} pm list packages -d | grep -w -q ${1} &>/dev/null; }
 function is_unlocked() { ${as} dumpsys window 2>/dev/null | grep -w -q "mShowingDream=false mDreamingLockscreen=false"; }
-function is_success() { [[ ${?} == 0 ]]; }
 function get_button_coords() {
     ${as} uiautomator dump &>/dev/null
     ui=$(${as} cat /sdcard/window_dump.xml 2>/dev/null | tee ${tmp_file})
     coords=$(perl -ne 'printf "%d %d\n", ($1+$3)/2, ($2+$4)/2 if /text="'${1}'"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/' <<<${ui} 2>/dev/null)
     [[ -z "${coords}" ]] && return 1 || echo ${coords}
+}
+function capture_error() {
+    mkdir -p ${logs}
+    log_name="${logs}/$(date +'%d:%m:%Y_%T')_${device_model}_${device_lang}"
+    cp ${tmp_file} "${log_name}.xml"
+    adb -s ${device_id} exec-out screencap -p > "${log_name}.png"
+    print ${y} "LOG: Screenshot saved as XML file and PNG to ${g}${log_name}.png ${log_name}.xml"
 }
 
 ### CHECKS ###
@@ -61,7 +73,6 @@ fi
 
 
 ### LOOP DEVICES ###
-actions=0
 successful_actions=0
 for device_id in ${devices}; do
     : $((actions++))
@@ -72,31 +83,36 @@ for device_id in ${devices}; do
         device_model=$(${as} getprop ro.product.model)
         device_abi=$(${as} getprop ro.product.cpu.abi)
         device_lang=$(${as} getprop persist.sys.locale); declare -n buttons="buttons_${device_lang:0:2}"
-        if ! is_installed ${gp}; then
-            error ${r} "Google Play is not installed in ${device_model}!" && continue
-        elif is_disabled ${gp}; then
-            error ${r} "Google Play app is disabled in ${device_model}!" && continue
+        if ! is_installed ${gp} || is_disabled ${gp}; then
+            error ${r} "Google Play is disabled or not installed in ${device_model}!" && continue
         else
             print ${g} "Device ${y}${device_model}${g} with ${y}${device_abi}${g} processor is successfully connected!"
         fi
 
         ### DOWNLOAD ###
+        if ! is_unlocked; then
+        print ${r} "The device is locked. Unlocked it to continue..."
+            while ! is_unlocked; do
+                is_still_connected || continue 2
+            done
+            print ${g} "Device unlocked!"
+        fi
+        print ${g} "Launching Google Play to ${y}${pkg}${g} app page."
+        ${as} am start -a android.intent.action.VIEW -d "https://play.google.com/store/apps/details?id=${pkg}" -p ${gp} &>/dev/null 
         if ! is_installed ${pkg}; then
-            if ! is_unlocked; then
-            print ${r} "The device is locked. Unlocked it to continue..."
-                while ! is_unlocked; do
-                    is_still_connected || continue 2
-                    sleep 1s
-                done
-                print ${g} "Device unlocked! Starting to download..."
-            fi
-            print ${g} "Launching Google Play to ${y}${pkg}${g} app page."
-            ${as} am start -a android.intent.action.VIEW -d "https://play.google.com/store/apps/details?id=${pkg}" -p ${gp} &>/dev/null
             if grep -w -q ${device_lang:0:2} <<< ${langs}; then
                 while ! install_coords=$(get_button_coords ${buttons["install"]}); do
                     grep "${buttons["hardware"]}" -w -q ${tmp_file} && error ${r} "${buttons_en["hardware"]}" && continue 2
                     grep "${buttons["country"]}" -w -q ${tmp_file} && error ${r} "${buttons_en["country"]}" && continue 2
+                    grep "${buttons["network"]}" -w -q ${tmp_file} && error ${r} "${buttons_en["network"]}" && continue 2
+                    grep "(${coins})[0-9]+\.[0-9]+" -E -w -q ${tmp_file} && error ${r} "This app is paid" && continue 2
+                    grep "\"${buttons["sign_in"]}\"" -w -q ${tmp_file} && error ${r} "You must be logged in to a Google account" && continue 2
                     is_still_connected || continue 2
+                    : $((install_rounds++))
+                    if  [[ ${install_rounds} -ge ${allowd_rounds} ]]; then
+                        error ${r} "An unknown error occurred."
+                        capture_error && continue 2
+                    fi
                 done
                 while ! get_button_coords ${buttons["cancel"]} &>/dev/null; do
                     ${as} input tap ${install_coords}
@@ -104,12 +120,41 @@ for device_id in ${devices}; do
                 done
                 print ${g} "The download has started, check the device to see the progress..."
             else
-                print ${y} "The device language ${g}(${device_lang:0:2})${y} is not supported by the script, you need to install the app manually."
+                print ${y} "The device language ${g}(${device_lang:0:2})${y} is not supported by apkpull, you need to install the app manually."
             fi
             while ! is_installed ${pkg}; do
                 is_still_connected || continue 2
             done
             print ${g} "The ${y}${pkg}${g} package successfully installed!"
+        else
+            if grep -w -q ${device_lang:0:2} <<< ${langs}; then
+                while ! update_coords=$(get_button_coords ${buttons["update"]}); do
+                    grep "(\"${buttons["open"]}\"|\"${buttons["play"]}\")" -E -w -q ${tmp_file} && break
+                    grep "\"${buttons["network"]}\"" -w -q ${tmp_file} && error ${r} "${buttons_en["network"]}" && continue 2
+                    grep "\"${buttons["sign_in"]}\"" -w -q ${tmp_file} && error ${r} "You must be logged in to a Google account" && continue 2
+                    : $((update_rounds++))
+                    if  [[ ${update_rounds} -ge ${allowd_rounds} ]]; then
+                        error ${r} "An unknown error occurred."
+                        capture_error && continue 2
+                    fi
+                done
+                if [[ -n ${update_coords} ]]; then
+                    while ! get_button_coords ${buttons["cancel"]} &>/dev/null; do
+                        ${as} input tap ${update_coords}
+                        is_still_connected || continue 2
+                    done
+                    print ${g} "The update has started, check the device to see the progress..."
+                    current_vc=$(${as} pm list packages --show-versioncode | grep -w ${pkg} | sed 's/.*versionCode://g')
+                    while [[ ${current_vc} == $(${as} pm list packages --show-versioncode | grep -w ${pkg} | sed 's/.*versionCode://g') ]]; do
+                        is_still_connected || continue 2
+                    done
+                    print ${g} "The ${y}${pkg}${g} package successfully updated!"
+                else
+                    print ${g} "The ${y}${pkg}${g} package already installled and updated."
+                fi
+            else
+                print ${y} "The device language ${g}(${device_lang:0:2})${y} is not supported by apkpull to check for updates."
+            fi 
         fi
 
         ### PULL ###
