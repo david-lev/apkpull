@@ -157,40 +157,37 @@ for device_id in ${devices}; do
         ### PULL ###
         vc=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
         dl="/home/${USER}/Downloads/apkpull_dl/${pkg}/${vc}"
-        mkdir -p ${dl}/tmp
+        mkdir -p ${dl}
         is_still_connected || continue
-        if apk_paths=$(${as} pm path ${pkg} | sed 's/package://g'); then
-            print ${g} "Pulling $(echo ${apk_paths} | sed 's/\s/\n/g' | wc -l) files from the device..."
-            for apk in ${apk_paths}; do
-                adb -s ${device_id} pull ${apk} ${dl}/tmp
+        base="${pkg}-${vc}_base.apk"
+        if paths=$(${as} pm path ${pkg} | sed 's/package://g'); then
+            for _path in ${paths}; do apk_paths+=("${_path}"); done
+            for apk_path in ${apk_paths[@]}; do
+                if [[ ${#apk_paths[@]} == 1 ]]; then
+                    if [[ ${apk_path} == *base.apk ]] && [[ ! -d "${dl}/${pkg}_${vc}" ]] ; then
+                        test -f "${dl}/${base/_base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}"
+                    elif [[ ${apk_path} == *base.apk ]] && [[ -d "${dl}/${pkg}_${vc}" ]]; then
+                        test -f "${dl}/${base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base}"
+                    else
+                        mkdir -p "${dl}/${pkg}_${vc}"
+                        split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
+                        test -f ${split_name} || adb -s ${device_id} pull ${apk_path} ${split_name}
+                    fi
+                else
+                    if [[ ${apk_path} == *base.apk ]]; then
+                        test -f "${dl}/${base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base}"
+                    else
+                        mkdir -p "${dl}/${pkg}_${vc}"
+                        split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
+                        test -f ${split_name} || adb -s ${device_id} pull ${apk_path} ${split_name}
+                    fi
+                fi
             done
         else
             error ${r} "Unable to get paths for the apk files :(" && continue
         fi
-
-        cd ${dl} || error ${r} "Can't go into ${dl}" 20
-        print ${y} "Checking & renaming files..."
-        for split in tmp/*; do
-            if [[ ${split} == tmp/split* ]]; then
-                new_name=$(basename ${split} | sed 's/split_//')
-                mv -f ${split} ${new_name}
-            else
-                base="${pkg}-${vc}_base.apk"
-                (test -f ${base} || test -f ${base/_base/}) || mv -f ${split} ${base}
-            fi
-        done
-        rm -rf tmp
-
-        if [[ $(ls -1 | wc -l) > 1 ]]; then # if there are split inside the folder
-            folder="${pkg}_${vc}"
-            mkdir -p ${folder}
-            mv -f !(${pkg}*) ${folder}
-            msg="There are $(ls -1 ${folder} | wc -l) splits and one base apk file"
-        else # if there is only one apk file
-            test -f ${base} && mv ${base} "${base/_base/}" # remove "_base" from apk filename
-        fi
         : $((successful_actions++))
-        print ${g} "The operation was completed successfully!. ${msg}"
+        print ${g} "The operation was completed successfully!"
     fi
 done
 
