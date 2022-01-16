@@ -186,6 +186,13 @@ for device_id in ${devices}; do
         else
             error ${r} "Unable to get paths for the apk files :(" && continue
         fi
+        obb_format="main.${vc}.${pkg}.obb"
+        obb_path="/sdcard/Android/obb/${pkg}"
+        if ${as} test -f "${obb_path}/${obb_format}"; then
+            test -f "${dl}/${obb_format}" || adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}"
+        elif ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
+            test -f "${dl}/${obb_format/main/patch}" || adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}"
+        fi
         : $((successful_actions++))
         print ${g} "The operation was completed successfully!"
     fi
