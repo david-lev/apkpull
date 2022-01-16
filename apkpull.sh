@@ -48,7 +48,7 @@ function get_button_coords() {
 }
 function capture_error() {
     mkdir -p ${logs_dir}
-    log_name="${logs_dir}/$(date +'%d:%m:%Y_%T')_${device_model}_${device_lang}"
+    log_name="${logs_dir}/$(date +'%d.%m.%y_%T')_${device_model}_${device_lang}"
     cp ${tmp_file} "${log_name}.xml"
     adb -s ${device_id} exec-out screencap -p > "${log_name}.png"
     print ${y} "LOG: Screenshot saved as XML file and PNG to ${g}${log_name}.png ${log_name}.xml"
@@ -155,31 +155,31 @@ for device_id in ${devices}; do
         fi
 
         ### PULL ###
+        pulled=0
         vc=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
         dl="/home/${USER}/Downloads/apkpull_dl/${pkg}/${vc}"
         mkdir -p ${dl}
         is_still_connected || continue
         base="${pkg}-${vc}_base.apk"
         if paths=$(${as} pm path ${pkg} | sed 's/package://g'); then
+            unset apk_paths
             for _path in ${paths}; do apk_paths+=("${_path}"); done
             for apk_path in ${apk_paths[@]}; do
                 if [[ ${#apk_paths[@]} == 1 ]]; then
-                    if [[ ${apk_path} == *base.apk ]] && [[ ! -d "${dl}/${pkg}_${vc}" ]] ; then
-                        test -f "${dl}/${base/_base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}"
-                    elif [[ ${apk_path} == *base.apk ]] && [[ -d "${dl}/${pkg}_${vc}" ]]; then
-                        test -f "${dl}/${base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base}"
-                    else
-                        mkdir -p "${dl}/${pkg}_${vc}"
-                        split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
-                        test -f ${split_name} || adb -s ${device_id} pull ${apk_path} ${split_name}
+                    if ! test -f "${dl}/${base/_base}"; then
+                        adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" && : $((pulled++))
                     fi
                 else
                     if [[ ${apk_path} == *base.apk ]]; then
-                        test -f "${dl}/${base}" || adb -s ${device_id} pull ${apk_path} "${dl}/${base}"
+                        if ! test -f "${dl}/${base}"; then
+                            adb -s ${device_id} pull ${apk_path} "${dl}/${base}" && : $((pulled++))
+                        fi
                     else
                         mkdir -p "${dl}/${pkg}_${vc}"
                         split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
-                        test -f ${split_name} || adb -s ${device_id} pull ${apk_path} ${split_name}
+                        if ! test -f ${split_name}; then
+                            adb -s ${device_id} pull ${apk_path} ${split_name} && : $((pulled++))
+                        fi
                     fi
                 fi
             done
@@ -189,12 +189,20 @@ for device_id in ${devices}; do
         obb_format="main.${vc}.${pkg}.obb"
         obb_path="/sdcard/Android/obb/${pkg}"
         if ${as} test -f "${obb_path}/${obb_format}"; then
-            test -f "${dl}/${obb_format}" || adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}"
+            if ! test -f "${dl}/${obb_format}"; then
+                adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" && : $((pulled++))
+            fi
         elif ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
-            test -f "${dl}/${obb_format/main/patch}" || adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}"
+            if ! test -f "${dl}/${obb_format/main/patch}"; then
+                adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" && : $((pulled++))
+            fi
         fi
         : $((successful_actions++))
-        print ${g} "The operation was completed successfully!"
+        if [[ ${pulled} -gt 0 ]]; then
+            print ${g} "The operation was completed successfully! ${pulled} files pulled."
+        else
+            print ${y} "The files already exist, nothing has been downloaded"
+        fi
     fi
 done
 
