@@ -211,8 +211,8 @@ for device_id in ${devices}; do
                 adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" && : $((obbs_pulled++))
             fi
         fi
-        if [[ ${@} =~ --uninstall|-u ]]; then
-            print ${g} "Uninstalling.."
+        if [[ ${@} =~ --uninstall ]]; then
+            print ${g} "Uninstalling ${y}${pkg}${g}..."
             ${as} pm uninstall ${pkg}
         fi
         : $((successful_actions++))
