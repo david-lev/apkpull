@@ -22,20 +22,19 @@ $y APK's puller tool $b|_|$y By david-lev$e
 ### VARS & FUNCS ###
 trap "echo; echo 'Exiting from apkpull proccess...'; exit 30" INT
 [[ "${@}" =~ "-x" ]] && set -x # for debugging
-pkg=${1}
-as="adb shell"
-gp="com.android.vending"
+[[ ${2} == "-d" && -d "${3}" ]] && dl_dir="${3}" || dl_dir="${HOME}/Downloads"
+pkg="${1}"
 logs_dir="/tmp/apkpull_log"
+gp="com.android.vending"
 langs="en he"
 coins="₪|$"
-allowd_rounds=5
+max_rounds=5
 declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["update"]="Update" ["cancel"]="Cancel" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
 declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["update"]="עדכן" ["cancel"]="ביטול" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
-shopt -s extglob
 tmp_file=$(mktemp)
 function error() { echo -e ">> ${r}ERROR: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function print() { echo -e ">> ${1}${2}${e}"; }
-function is_device_connected() { [[ $(adb -s ${device_id} get-state 2>/dev/null) == "device" ]]; }
+function is_device_connected() { [[ "$(adb -s ${device_id} get-state 2>/dev/null)" == "device" ]]; }
 function is_still_connected() { is_device_connected || error ${r} "Device ${y}${device_model}${r} disconnected!"; };
 function is_installed() { ${as} pm path ${1} &>/dev/null; }
 function is_disabled() { ${as} pm list packages -d | grep -w -q ${1} &>/dev/null; }
@@ -53,10 +52,24 @@ function capture_error() {
     adb -s ${device_id} exec-out screencap -p > "${log_name}.png"
     print ${y} "LOG: Screenshot saved as XML file and PNG to ${g}${log_name}.png ${log_name}.xml"
 }
+function usage() {
+    echo "Usage: "${0}" [PACKAGE] [OPTIONS]"
+    echo "   example: "${0}" com.whatsapp -d ~/Documents/my_apks/ --uninstall"
+    echo "  -h, --help              display this help and exit"
+    echo "  --uninstall             uninstall the app after pulling"
+    echo "  -d path to directory    pull the files into spesific path insted of ~/Downloads/apkpull_dl/"
+    echo -e "\nFor bug reports, questions, issues: https://github.com/david-lev/apkpull"
+}
 
 ### CHECKS ###
-if [[ ${#} < 1  || ${1} == "--help" || ${1} == "-help" ]]; then
-    error ${r} "Package name must be provided! Usage: ${y}apkpull [PACKAGE NAME]${r}" 10
+if [[ "${1}" == "--help" || ${1} == "-h" ]]; then
+    usage && exit 10
+elif [[ "${1}" == -* ]]; then
+    error ${r} "Unknown command. Run ${y}${0} --help${r} for more info." 10
+elif [[ ${#} < 1 ]]; then
+    error ${r} "Package name must be provided! Run ${y}${0} --help${r} for more info." 10
+elif ! (grep -Pq "^([A-Za-z]{1}[A-Za-z\d_]*\.)+[A-Za-z][A-Za-z\d_]*$"<<<${pkg}); then
+    error ${r} "Invalid syntax for package name." 40
 elif [[ $(curl --connect-timeout 0.5 -s -o /dev/null -w "%{http_code}" "https://play.google.com/store/apps/details?id=${pkg}") == 404 ]]; then
     error ${r} "This app doesn't exists in Google Play." 40
 elif ! command -v adb >/dev/null 2>&1; then
@@ -106,7 +119,7 @@ for device_id in ${devices}; do
                     grep "\"${buttons["sign_in"]}\"" -w -q ${tmp_file} && error ${r} "You must be logged in to a Google account" && continue 2
                     is_still_connected || continue 2
                     : $((install_rounds++))
-                    if  [[ ${install_rounds} -ge ${allowd_rounds} ]]; then
+                    if  [[ ${install_rounds} -ge ${max_rounds} ]]; then
                         error ${r} "An unknown error occurred."
                         capture_error && continue 2
                     fi
@@ -130,7 +143,7 @@ for device_id in ${devices}; do
                     grep "\"${buttons["network"]}\"" -w -q ${tmp_file} && error ${r} "${buttons_en["network"]}" && continue 2
                     grep "\"${buttons["sign_in"]}\"" -w -q ${tmp_file} && error ${r} "You must be logged in to a Google account" && continue 2
                     : $((update_rounds++))
-                    if  [[ ${update_rounds} -ge ${allowd_rounds} ]]; then
+                    if  [[ ${update_rounds} -ge ${max_rounds} ]]; then
                         error ${r} "An unknown error occurred."
                         capture_error && continue 2
                     fi
@@ -155,9 +168,9 @@ for device_id in ${devices}; do
         fi
 
         ### PULL ###
-        pulled=0
+        base_pulled=0; splits_pulled=0; obbs_pulled=0
         vc=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
-        dl="/home/${USER}/Downloads/apkpull_dl/${pkg}/${vc}"
+        dl="${dl_dir}/apkpull_dl/${pkg}/${vc}"
         mkdir -p ${dl}
         is_still_connected || continue
         base="${pkg}-${vc}_base.apk"
@@ -167,18 +180,18 @@ for device_id in ${devices}; do
             for apk_path in ${apk_paths[@]}; do
                 if [[ ${#apk_paths[@]} == 1 ]]; then
                     if ! test -f "${dl}/${base/_base}"; then
-                        adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" && : $((pulled++))
+                        adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" && : $((base_pulled++))
                     fi
                 else
                     if [[ ${apk_path} == *base.apk ]]; then
                         if ! test -f "${dl}/${base}"; then
-                            adb -s ${device_id} pull ${apk_path} "${dl}/${base}" && : $((pulled++))
+                            adb -s ${device_id} pull ${apk_path} "${dl}/${base}" && : $((base_pulled++))
                         fi
                     else
                         mkdir -p "${dl}/${pkg}_${vc}"
                         split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
                         if ! test -f ${split_name}; then
-                            adb -s ${device_id} pull ${apk_path} ${split_name} && : $((pulled++))
+                            adb -s ${device_id} pull ${apk_path} ${split_name} && : $((splits_pulled++))
                         fi
                     fi
                 fi
@@ -190,16 +203,22 @@ for device_id in ${devices}; do
         obb_path="/sdcard/Android/obb/${pkg}"
         if ${as} test -f "${obb_path}/${obb_format}"; then
             if ! test -f "${dl}/${obb_format}"; then
-                adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" && : $((pulled++))
-            fi
-        elif ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
-            if ! test -f "${dl}/${obb_format/main/patch}"; then
-                adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" && : $((pulled++))
+                adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" && : $((obbs_pulled++))
             fi
         fi
+        if ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
+            if ! test -f "${dl}/${obb_format/main/patch}"; then
+                adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" && : $((obbs_pulled++))
+            fi
+        fi
+        if [[ ${@} =~ --uninstall|-u ]]; then
+            print ${g} "Uninstalling.."
+            ${as} pm uninstall ${pkg}
+        fi
         : $((successful_actions++))
+        pulled=$((base_pulled+splits_pulled+obbs_pulled))
         if [[ ${pulled} -gt 0 ]]; then
-            print ${g} "The operation was completed successfully! ${pulled} files pulled."
+            print ${g} "The operation was completed successfully! ${pulled} files pulled ${y}(${base_pulled} base, ${splits_pulled} splits and ${obbs_pulled} obb's)${g} into ${y}${dl}."
         else
             print ${y} "The files already exist, nothing has been downloaded"
         fi
