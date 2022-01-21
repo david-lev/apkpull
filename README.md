@@ -1,26 +1,34 @@
 ![Alt Text](https://user-images.githubusercontent.com/42866208/149928481-69136427-bad1-4ea3-a6af-0bda0414bf9e.gif)
 ---
-# APKpull
+# 📱 APKpull
 
-**APKpull provides reliability in downloading apps from Google Play from real Android devices or emulators.**
+**APKpull provides reliability in downloading apps from Google Play from real Android devices or emulators**
 
 ## How to use?
-- Clone APKpull:
+### Run APKpull with one command:
+```bash
+curl -sL bit.ly/apkpull | bash -s -- com.whatsapp
+
 ```
+> You can also pull the files into spesific path insted of `~/Downloads/apkpull_dl` by adding `-d /path/to/directory` flag,  Uninstall the app after the pulling by adding `--uninstall` flag, or with `--help` to get instructions.
+> - For example:
+```bash
+curl -sL bit.ly/apkpull | bash -s -- com.tranzmate -d ~/Documents/my_apks_dir/ --uninstall
+```
+### Or, if you want to make changes to the script:
+- Clone APKpull:
+```bash
 git clone https://github.com/david-lev/apkpull.git
 ```
 - Go to script directory:
+```bash
+cd apkpull && chmod +x apkpull.sh
 ```
-cd apkpull
-```
-- Run the script with package name:
-```
+- Make your changes and run the script with package name:
+```bash
 ./apkpull.sh com.whatsapp
 ```
-- You can also pull the files into spesific path insted of `~/Downloads/apkpull_dl` by adding `-d /path/to/directory` flag, and Uninstall the app after the pulling by adding `--uninstall` flag.  for example:
-```
-./apkpull.sh com.whatsapp -d ~/Documents/my_apks_dir/ --uninstall
-```
+---
 - Because each device may have different splits, several devices can be connected at the same time. Only splits that do not already exist locally will be downloaded again.
 - The script's exit codes are: `0` if all success, `1`-`9` for every faild device, `10` if pkg not provided, `20` if adb not found, `30` for INT signal (Ctrl+C), `40` if app not in play store, and `50` if no devices connected
 - I would recommend following the device screen for the first few times to see how the automation works. Then you can already run it with your eyes closed...
