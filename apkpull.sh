@@ -40,6 +40,7 @@ function is_installed() { ${as} pm path ${1} &>/dev/null; }
 function is_disabled() { ${as} pm list packages -d | grep -w -q ${1} &>/dev/null; }
 function is_unlocked() { ${as} dumpsys window 2>/dev/null | grep -w -q "mShowingDream=false mDreamingLockscreen=false"; }
 function get_button_coords() {
+    ${as} rm -f /sdcard/window_dump.xml
     ${as} uiautomator dump &>/dev/null
     ui=$(${as} cat /sdcard/window_dump.xml 2>/dev/null | tee ${tmp_file})
     coords=$(perl -ne 'printf "%d %d\n", ($1+$3)/2, ($2+$4)/2 if /text="'${1}'"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/' <<<${ui} 2>/dev/null)
