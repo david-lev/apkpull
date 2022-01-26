@@ -188,18 +188,21 @@ for device_id in ${devices}; do
             for apk_path in ${apk_paths[@]}; do
                 if [[ ${#apk_paths[@]} == 1 ]]; then
                     if ! test -f "${dl}/${base/_base}"; then
-                        adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" && : $((base_pulled++))
+                        print ${g} "Pulling ${y}${base/_base}${g}..."
+                        adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" >/dev/null && : $((base_pulled++))
                     fi
                 else
                     if [[ ${apk_path} == *base.apk ]]; then
                         if ! test -f "${dl}/${base}"; then
-                            adb -s ${device_id} pull ${apk_path} "${dl}/${base}" && : $((base_pulled++))
+                            print ${g} "Pulling ${y}${base}${g}..."
+                            adb -s ${device_id} pull ${apk_path} "${dl}/${base}" >/dev/null && : $((base_pulled++))
                         fi
                     else
                         mkdir -p "${dl}/${pkg}_${vc}"
                         split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
                         if ! test -f ${split_name}; then
-                            adb -s ${device_id} pull ${apk_path} ${split_name} && : $((splits_pulled++))
+                            print ${g} "Pulling ${y}$(sed 's/.*split_//g' <<<${apk_path})${g}..."
+                            adb -s ${device_id} pull ${apk_path} ${split_name} >/dev/null && : $((splits_pulled++))
                         fi
                     fi
                 fi
