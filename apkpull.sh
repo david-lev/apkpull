@@ -115,7 +115,7 @@ for device_id in ${devices}; do
                     grep -wq "${buttons["hardware"]}" ${tmp_file} && print ${r} "${buttons_en["hardware"]}" && continue 2
                     grep -wq "${buttons["country"]}" ${tmp_file} && print ${r} "${buttons_en["country"]}" && continue 2
                     grep -wq "${buttons["network"]}" ${tmp_file} && print ${r} "${buttons_en["network"]}." && continue 2
-                    grep -Ewq "(${coins})[0-9]+\.[0-9]+" ${tmp_file} && print ${r} "This app is paid." && continue 2
+                    grep -Ewq "[0-9]+\.[0-9]+.(${coins})" ${tmp_file} && print ${r} "This app is paid." && continue 2
                     grep -wq "\"${buttons["sign_in"]}\"" ${tmp_file} && print ${r} "You must be logged in to a Google account." && continue 2
                     grep -wq "\"${buttons["cancel"]}\"" ${tmp_file} && print ${y} "The app is already in the download process." && install_coords="skip" && break
                     is_still_connected || continue 2
