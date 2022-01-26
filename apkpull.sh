@@ -214,12 +214,14 @@ for device_id in ${devices}; do
         obb_path="/sdcard/Android/obb/${pkg}"
         if ${as} test -f "${obb_path}/${obb_format}"; then
             if ! test -f "${dl}/${obb_format}"; then
-                adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" && : $((obbs_pulled++))
+                print ${g} "Pulling ${y}${obb_format}${g}..."
+                adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" >/dev/null && : $((obbs_pulled++))
             fi
         fi
         if ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
             if ! test -f "${dl}/${obb_format/main/patch}"; then
-                adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" && : $((obbs_pulled++))
+                print ${g} "Pulling ${y}${obb_format/main/patch}${g}..."
+                adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" >/dev/null && : $((obbs_pulled++))
             fi
         fi
         if [[ ${@} =~ --uninstall ]]; then
