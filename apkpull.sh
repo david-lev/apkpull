@@ -189,20 +189,20 @@ for device_id in ${devices}; do
             for apk_path in ${apk_paths[@]}; do
                 if [[ ${#apk_paths[@]} == 1 ]]; then
                     if ! test -f "${dl}/${base/_base}"; then
-                        print ${g} "Pulling ${y}${base/_base}${g}..."
+                        print ${g} "Pulling ${y}${base/_base} ($(${as} du -sh ${apk_path} | sed 's/\s.*//g'))${g}..."
                         adb -s ${device_id} pull ${apk_path} "${dl}/${base/_base}" >/dev/null && : $((base_pulled++))
                     fi
                 else
                     if [[ ${apk_path} == *base.apk ]]; then
                         if ! test -f "${dl}/${base}"; then
-                            print ${g} "Pulling ${y}${base}${g}..."
+                            print ${g} "Pulling ${y}${base} ($(${as} du -sh ${apk_path} | sed 's/\s.*//g'))${g}..."
                             adb -s ${device_id} pull ${apk_path} "${dl}/${base}" >/dev/null && : $((base_pulled++))
                         fi
                     else
                         mkdir -p "${dl}/${pkg}_${vc}"
                         split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
                         if ! test -f ${split_name}; then
-                            print ${g} "Pulling ${y}$(sed 's/.*split_//g' <<<${apk_path})${g}..."
+                            print ${g} "Pulling ${y}$(sed 's/.*split_//g' <<<${apk_path}) ($(${as} du -sh ${apk_path} | sed 's/\s.*//g'))${g}..."
                             adb -s ${device_id} pull ${apk_path} ${split_name} >/dev/null && : $((splits_pulled++))
                         fi
                     fi
@@ -215,13 +215,13 @@ for device_id in ${devices}; do
         obb_path="/sdcard/Android/obb/${pkg}"
         if ${as} test -f "${obb_path}/${obb_format}"; then
             if ! test -f "${dl}/${obb_format}"; then
-                print ${g} "Pulling ${y}${obb_format}${g}..."
+                print ${g} "Pulling ${y}${obb_format} ($(${as} du -sh "${obb_path}/${obb_format}" | sed 's/\s.*//g'))${g}..."
                 adb -s ${device_id} pull "${obb_path}/${obb_format}" "${dl}/${obb_format}" >/dev/null && : $((obbs_pulled++))
             fi
         fi
         if ${as} test -f "${obb_path}/${obb_format/main/patch}"; then
             if ! test -f "${dl}/${obb_format/main/patch}"; then
-                print ${g} "Pulling ${y}${obb_format/main/patch}${g}..."
+                print ${g} "Pulling ${y}${obb_format/main/patch} ($(${as} du -sh "${obb_path}/${obb_format/main/patch}" | sed 's/\s.*//g'))${g}..."
                 adb -s ${device_id} pull "${obb_path}/${obb_format/main/patch}" "${dl}/${obb_format/main/patch}" >/dev/null && : $((obbs_pulled++))
             fi
         fi
