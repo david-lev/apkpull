@@ -53,8 +53,8 @@ function capture_error() {
     print ${y} "LOG: Screenshot saved as XML file and PNG to ${g}${log_name}.png ${log_name}.xml"
 }
 function usage() {
-    echo "Usage: "${0}" [PACKAGE] [OPTIONS]"
-    echo "   example: "${0}" com.whatsapp -d ~/Documents/my_apks/ --uninstall"
+    echo "Usage: apkpull.sh [PACKAGE] [OPTIONS]"
+    echo "   example: apkpull.sh com.whatsapp -d ~/Documents/my_apks/ --uninstall"
     echo "  -h, --help              display this help and exit"
     echo "  --uninstall             uninstall the app after pulling"
     echo "  -d path to directory    pull the files into spesific path insted of ~/Downloads/apkpull_dl/"
@@ -66,7 +66,7 @@ if [[ "${1}" == "--help" || ${1} == "-h" ]]; then
     usage && exit 10
 elif [[ "${1}" == -* ]]; then
     print ${r} "Unknown command. Run ${y}${0} --help${r} for more info." 10
-elif [[ ${#} < 1 ]]; then
+elif [[ ${#} -lt 1 ]]; then
     print ${r} "Package name must be provided! Run ${y}${0} --help${r} for more info." 10
 elif ! (grep -Pq "^([A-Za-z]{1}[A-Za-z\d_]*\.)+[A-Za-z][A-Za-z\d_]*$"<<<${pkg}); then
     print ${r} "Invalid syntax for package name." 40
@@ -74,7 +74,7 @@ elif [[ $(curl --connect-timeout 0.5 -s -o /dev/null -w "%{http_code}" "https://
     print ${r} "This app doesn't exists in Google Play." 40
 elif ! command -v adb >/dev/null 2>&1; then
     print ${r} "Unable to find ADB, please install or add to PATH." 20
-elif [[ $(adb devices -l | sed '/List.*\|^$/d; s/\s.*//g' | wc -l) < 1 ]]; then
+elif [[ $(adb devices -l | sed '/List.*\|^$/d; s/\s.*//g' | wc -l) -lt 1 ]]; then
     print ${r} "No devices found! At least one device must be connected" 50
 else
     devices=$(adb devices -l | sed '/List.*\|^$/d; s/\s.*//g')
@@ -83,11 +83,11 @@ fi
 
 
 ### LOOP DEVICES ###
-successful_actions=0
+actions=0; successful_actions=0
 for device_id in ${devices}; do
     : $((actions++))
     if ! is_device_connected; then
-        print ${r} "The device ${device_id} is $(adb get-state ${device_id})!" && continue
+        print ${r} "The device is $(adb -s ${device_id} get-state 2>&1| head -n 1 | sed 's/error: device \|\.//g')!" && continue
     else
         as="adb -s ${device_id} shell"
         device_model=$(${as} getprop ro.product.model)
