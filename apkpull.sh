@@ -34,7 +34,7 @@ declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התק�
 tmp_file=$(mktemp)
 function print() { echo -e ">> ${device_model:-APKPULL}: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function is_device_connected() { [[ "$(adb -s ${device_id} get-state 2>/dev/null)" == "device" ]]; }
-function is_still_connected() { is_device_connected || print ${r} "Device ${y}${device_model}${r} disconnected!"; };
+function is_still_connected() { is_device_connected || (print ${r} "Device ${y}${device_model}${r} disconnected!" && false); };
 function is_installed() { ${as} pm path ${1} &>/dev/null; }
 function is_disabled() { ${as} pm list packages -d | grep -wq ${1} &>/dev/null; }
 function is_unlocked() { ${as} dumpsys window 2>/dev/null | grep -wq "mShowingDream=false mDreamingLockscreen=false"; }
