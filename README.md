@@ -1,6 +1,7 @@
 ![Alt Text](https://user-images.githubusercontent.com/42866208/149928481-69136427-bad1-4ea3-a6af-0bda0414bf9e.gif)
 ---
 # 📱 APKpull
+[![CodeFactor](https://www.codefactor.io/repository/github/david-lev/apkpull/badge)](https://www.codefactor.io/repository/github/david-lev/apkpull)
 
 **APKpull provides reliability in downloading apps from Google Play from real Android devices or emulators**
 
