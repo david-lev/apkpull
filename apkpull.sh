@@ -151,7 +151,7 @@ for device_id in ${devices}; do
                     : $((update_rounds++))
                     if  [[ ${update_rounds} -ge ${max_rounds} ]]; then
                         print ${r} "An unknown error occurred."
-                        capture_error && continue 2
+                        capture_error && print ${r} "Can't check for updates." && break
                     fi
                 done
                 if [[ -n ${update_coords} ]]; then
