@@ -1,10 +1,10 @@
 #!/bin/bash
 
-########################### APK-PULL | https://github.com/david-lev/apkpull ###########################
-# APKpull is used to create automations for downloading android apps from Google Play and puling them #
-# to a local machine or server as apk files. You can connect several devices at the same time.        #
-# Usage: apkpull.sh [package-name]; Optionals: [-x or debug] | Created with ❤️ by David Lev            #
-#######################################################################################################
+############################### APK-PULL | https://github.com/david-lev/apkpull ###############################
+# APKpull is used to create automations for downloading android apps from Google Play and puling them to a -  #
+# - local machine or server as apk files. You can connect several devices at the same time.                   #
+# Usage: apkpull.sh [package-name]; Optionals: [-d /path/to/dir] [--uninstall] | Created with ❤️ by David Lev  #
+###############################################################################################################
 
 
 e='\e[0m'; r='\e[31m'; g='\e[32m'
@@ -29,8 +29,8 @@ gp="com.android.vending"
 langs="en he"
 coins="₪|$"
 max_rounds=5
-declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["update"]="Update" ["cancel"]="Cancel" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
-declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["update"]="עדכן" ["cancel"]="ביטול" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
+declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["uninstall"]="Uninstall" ["deactivate"]="Deactivate" ["update"]="Update" ["cancel"]="Cancel" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
+declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["uninstall"]="הסר התקנה" ["deactivate"]="ביטול הפעלה" ["update"]="עדכן" ["cancel"]="ביטול" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
 tmp_file=$(mktemp)
 function print() { echo -e ">> ${device_model:-APKPULL}: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function is_device_connected() { [[ "$(adb -s ${device_id} get-state 2>/dev/null)" == "device" ]]; }
@@ -147,6 +147,7 @@ for device_id in ${devices}; do
                     grep -wq "\"${buttons["sign_in"]}\"" ${tmp_file} && print ${r} "You must be logged in to a Google account, Can't check for updates." && break
                     grep -wq "\"${buttons["cancel"]}\"" ${tmp_file} && print ${y} "The app is already in the update process." && update_coords="skip" && break
                     grep -Ewq "(\"${buttons["open"]}\"|\"${buttons["play"]}\")" ${tmp_file} && break
+                    grep -Ewq "(\"${buttons["uninstall"]}\"|\"${buttons["deactivate"]}\")" ${tmp_file} && ! grep -Ewq "(\"${buttons["open"]}\"|\"${buttons["play"]}\")" ${tmp_file} && break
                     : $((update_rounds++))
                     if  [[ ${update_rounds} -ge ${max_rounds} ]]; then
                         print ${r} "An unknown error occurred."
