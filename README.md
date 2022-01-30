@@ -1,4 +1,4 @@
-![Alt Text](https://user-images.githubusercontent.com/42866208/149928481-69136427-bad1-4ea3-a6af-0bda0414bf9e.gif)
+![Alt Text](https://user-images.githubusercontent.com/42866208/151712735-6cf6ef8a-c5e0-46e8-9b54-53b213aa3ed8.gif)
 ---
 # 📱 APKpull
 [![CodeFactor](https://www.codefactor.io/repository/github/david-lev/apkpull/badge)](https://www.codefactor.io/repository/github/david-lev/apkpull)
@@ -11,7 +11,10 @@
 curl -sL bit.ly/apkpull | bash -s -- com.whatsapp
 
 ```
-> You can also pull the files into spesific path insted of `~/Downloads/apkpull_dl` by adding `-d /path/to/directory` flag,  Uninstall the app after the pulling by adding `--uninstall` flag, or with `--help` to get instructions.
+> - APKpull get's [PackageName](https://support.google.com/admob/answer/9972781) as the first (required) argument. 
+> - You can also pull the files into spesific path insted of `~/Downloads/apkpull_dl` by adding `-d /path/to/directory` flag
+> - Uninstall the app after the pulling is complete by adding `--uninstall` flag.
+> - `--help` to get instructions.
 > - For example:
 ```bash
 curl -sL bit.ly/apkpull | bash -s -- com.tranzmate -d ~/Documents/my_apks_dir/ --uninstall
@@ -35,10 +38,10 @@ cd apkpull && chmod +x apkpull.sh
 - I would recommend following the device screen for the first few times to see how the automation works. Then you can already run it with your eyes closed...
 - APKpull uses [ADB](https://developer.android.com/studio/command-line/adb) to connect to devices, jump into the app page in Google Play, make the necessary clicks based on the existing data on the screen, download the app and finally pull it to local as an APK with Splits and even OBB's (if any).
 - While running the script, many tests are performed: checking updates, locked screen, device compatibility or country restrictions, paid apps, network, sign in check and more.
-- If there is an untreated end case, after several attempts a log will be created that will contain a screenshot and dump ui from the device, which can be attached to a new issue on github.
+- If there is an untreated end case, after several attempts (Can be increased by raising the number of [`max_rounds`](/apkpull.sh#L31)) a log will be created that will contain a screenshot and dump ui from the device, which can be attached to a new issue on github.
 - Due to the way Google Play app is built, most of the tests and clicks are based on text, so English and Hebrew are currently supported. If you want to support other languages as well, fork this repo, create a list of `buttons_lang` at the beginning of the script, fill in the values in the existing format in the other languages and open PR.
 - The files are saved by default to the `~/Downloads/apkpull_dl` folder in the next example format:
-```
+```bash
 .
 ├── com.flambestudios.picplaypost
 │   └── 451
