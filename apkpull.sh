@@ -29,8 +29,8 @@ gp="com.android.vending"
 langs="en he"
 coins="₪|$"
 max_rounds=5
-declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["uninstall"]="Uninstall" ["deactivate"]="Deactivate" ["update"]="Update" ["cancel"]="Cancel" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
-declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["uninstall"]="הסר התקנה" ["deactivate"]="ביטול הפעלה" ["update"]="עדכן" ["cancel"]="ביטול" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
+declare -A buttons_en=( ["open"]="Open" ["play"]="Play" ["install"]="Install" ["uninstall"]="Uninstall" ["deactivate"]="Deactivate" ["update"]="Update" ["cancel"]="Cancel" ["accept"]="Accept" ["sign_in"]="Sign in" ["hardware"]="Your device isn't compatible with this version." ["country"]="This item isn't available in your country." ["network"]="You're offline" )
+declare -A buttons_he=( ["open"]="פתח" ["play"]="שחק" ["install"]="התקנה" ["uninstall"]="הסר התקנה" ["deactivate"]="ביטול הפעלה" ["update"]="עדכן" ["cancel"]="ביטול" ["accept"]="אישור" ["sign_in"]="כניסה" ["hardware"]="המכשיר שלך אינו תואם לגירסה זו." ["country"]="פריט זה אינו זמין בארצך." ["network"]="אין חיבור לאינטרנט" )
 tmp_file=$(mktemp)
 function print() { echo -e ">> ${device_model:-APKPULL}: ${1}${2}${e}"; [[ ${3} =~ ^[0-9]{1,3}$ && ${3} -ge 0 && ${3} -le 255 ]] && exit ${3} || true; }
 function is_device_connected() { [[ "$(adb -s ${device_id} get-state 2>/dev/null)" == "device" ]]; }
@@ -66,7 +66,7 @@ if [[ "${1}" == "--help" || ${1} == "-h" ]]; then
     usage && exit 10
 elif [[ "${1}" == -* ]]; then
     print ${r} "Unknown command. Run ${y}${0} --help${r} for more info." 10
-elif [[ ${#} -lt 1 ]]; then
+elif [[ $# -lt 1 ]]; then
     print ${r} "Package name must be provided! Run ${y}${0} --help${r} for more info." 10
 elif ! (grep -Pq "^([A-Za-z]{1}[A-Za-z\d_]*\.)+[A-Za-z][A-Za-z\d_]*$"<<<${pkg}); then
     print ${r} "Invalid syntax for package name." 40
@@ -128,6 +128,7 @@ for device_id in ${devices}; do
                 if [[ ${install_coords} != "skip" ]]; then
                     while ! get_button_coords ${buttons["cancel"]} &>/dev/null; do
                         ${as} input tap ${install_coords}
+                        accept_coords=$(get_button_coords ${buttons["accept"]}) && ${as} input tap ${accept_coords} && print ${y} "Permissions approved."
                         is_still_connected || continue 2
                     done
                     print ${g} "The download has started, check the device to see the progress..."
@@ -138,6 +139,7 @@ for device_id in ${devices}; do
             while ! is_installed ${pkg}; do
                 is_still_connected || continue 2
                 install_coords=$(get_button_coords ${buttons["install"]}) && ${as} input tap ${install_coords} && print ${y} "Download canceled manually, installs again."
+                accept_coords=$(get_button_coords ${buttons["accept"]}) && ${as} input tap ${accept_coords} && print ${y} "Permissions approved."
             done
             print ${g} "The ${y}${pkg}${g} package successfully installed!"
         else
@@ -162,8 +164,8 @@ for device_id in ${devices}; do
                         done
                         print ${g} "The update has started, check the device to see the progress..."
                     fi
-                    current_vc=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
-                    while [[ ${current_vc} == $(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g') ]]; do
+                    current_vcode=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
+                    while [[ ${current_vcode} == $(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g') ]]; do
                         is_still_connected || continue 2
                         update_coords=$(get_button_coords ${buttons["update"]}) && ${as} input tap ${update_coords} && print ${y} "Update canceled manually, installs again."
                     done
@@ -178,11 +180,11 @@ for device_id in ${devices}; do
 
         ### PULL ###
         base_pulled=0; splits_pulled=0; obbs_pulled=0
-        vc=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
-        dl="${dl_dir}/apkpull_dl/${pkg}/${vc}"
-        mkdir -p ${dl}
+        vcode=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
+        dl="${dl_dir}/apkpull_dl/${pkg}/${vcode}"
+        mkdir -p "${dl}"
         is_still_connected || continue
-        base="${pkg}-${vc}_base.apk"
+        base="${pkg}-${vcode}_base.apk"
         if paths=$(${as} pm path ${pkg} | sed 's/package://g'); then
             unset apk_paths
             for _path in ${paths}; do apk_paths+=("${_path}"); done
@@ -199,8 +201,8 @@ for device_id in ${devices}; do
                             adb -s ${device_id} pull ${apk_path} "${dl}/${base}" >/dev/null && : $((base_pulled++))
                         fi
                     else
-                        mkdir -p "${dl}/${pkg}_${vc}"
-                        split_name="${dl}/${pkg}_${vc}/$(sed 's/.*split_//g' <<<${apk_path})"
+                        mkdir -p "${dl}/${pkg}_${vcode}"
+                        split_name="${dl}/${pkg}_${vcode}/$(sed 's/.*split_//g' <<<${apk_path})"
                         if ! test -f ${split_name}; then
                             print ${g} "Pulling ${y}$(sed 's/.*split_//g' <<<${apk_path}) ($(${as} du -sh ${apk_path} | sed 's/\s.*//g'))${g}..."
                             adb -s ${device_id} pull ${apk_path} ${split_name} >/dev/null && : $((splits_pulled++))
@@ -211,7 +213,7 @@ for device_id in ${devices}; do
         else
             print ${r} "Unable to get paths for the apk files :(" && continue
         fi
-        obb_format="main.${vc}.${pkg}.obb"
+        obb_format="main.${vcode}.${pkg}.obb"
         obb_path="/sdcard/Android/obb/${pkg}"
         if ${as} test -f "${obb_path}/${obb_format}"; then
             if ! test -f "${dl}/${obb_format}"; then
