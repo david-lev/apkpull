@@ -143,7 +143,7 @@ for device_id in ${devices}; do
                         is_on_gplay || (print ${y} "Device exited from Google Play, Launching again.." && launch)
                         is_still_connected || continue 2
                     done
-                    print ${g} "The download has started, check the device to see the progress..."
+                    print ${g} "The download has started..."
                 fi
             else
                 print ${y} "The device language ${g}(${device_lang:0:2})${y} is not supported by apkpull, you need to install the app manually."
@@ -178,7 +178,7 @@ for device_id in ${devices}; do
                             is_on_gplay || (print ${y} "Device exited from Google Play, Launching again.." && launch)
                             is_still_connected || continue 2
                         done
-                        print ${g} "The update has started, check the device to see the progress..."
+                        print ${g} "The update has started..."
                     fi
                     current_vcode=$(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g')
                     while [[ ${current_vcode} == $(${as} pm list packages --show-versioncode | grep "package:${pkg} " | sed 's/.*versionCode://g') ]]; do
