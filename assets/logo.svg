@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="apkpull-logo-title">
+  <title id="apkpull-logo-title">apkpull</title>
+  <defs>
+    <linearGradient id="apkpull-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5CE698"/>
+      <stop offset="1" stop-color="#0B8457"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="92" height="92" rx="22" fill="url(#apkpull-bg)"/>
+  <rect x="44" y="14" width="12" height="26" rx="6" fill="#F7FFFA"/>
+  <path d="M28 40 L72 40 L50 68 Z" fill="#F7FFFA"/>
+  <rect x="27" y="76" width="46" height="9" rx="4.5" fill="#F7FFFA"/>
+</svg>
