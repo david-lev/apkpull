@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: pytest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Every supported Python version, on the cheapest runner. Integration tests that need a
+          # real adb device/emulator skip themselves automatically when none is present (see
+          # tests/integration/test_live_emulator.py) — no device is set up in CI.
+          - { os: ubuntu-latest, python-version: '3.10' }
+          - { os: ubuntu-latest, python-version: '3.11' }
+          - { os: ubuntu-latest, python-version: '3.12' }
+          - { os: ubuntu-latest, python-version: '3.13' }
+          - { os: ubuntu-latest, python-version: '3.14' }
+          # Min/max Python only on macOS/Windows, to catch OS-specific issues (path handling,
+          # subprocess quoting, apkpull.notify's platform branches, ...).
+          - { os: macos-latest, python-version: '3.10' }
+          - { os: macos-latest, python-version: '3.14' }
+          - { os: windows-latest, python-version: '3.10' }
+          - { os: windows-latest, python-version: '3.14' }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run ruff format
+        run: uv run ruff format --check .
+
+      - name: Run ty
+        run: uv run ty check

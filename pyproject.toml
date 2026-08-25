@@ -1,0 +1,92 @@
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "apkpull"
+module-root = ""
+
+[project]
+name = "apkpull"
+version = "2.0.0"
+description = "Automate downloading (pulling) Android apps from Google Play, across multiple real/emulated devices at once."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "David Lev", email = "david@davidlev.dev" }]
+keywords = ["android", "adb", "apk", "google-play", "automation", "uiautomator"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "apkfile>=1.4.0",
+    "rich>=13.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest~=9.0",
+    "pytest-cov~=7.0",
+    "pytest-timeout~=2.3",
+    "ruff~=0.16",
+    "ty>=0.0.65",
+    "pre-commit~=4.5",
+]
+
+[project.scripts]
+apkpull = "apkpull.cli:run"
+
+[project.urls]
+Homepage = "https://github.com/david-lev/apkpull"
+"Issue Tracker" = "https://github.com/david-lev/apkpull/issues"
+"Source Code" = "https://github.com/david-lev/apkpull"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+extend-select = [
+    "T20", # flake8-print: forbid stray `print()`/`pprint()` calls in library code (use `logging` instead)
+    "E711", # forbid `== None` / `!= None`; use `is None` / `is not None` instead
+    "E712", # forbid `== True` / `== False`; use `is`/`is not` or plain truthiness instead
+    "E741", # forbid ambiguous single-character names (`l`, `O`, `I`)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"apkpull/cli.py" = ["T201"]
+"tests/**" = ["T201"]
+
+[tool.ty.src]
+include = ["apkpull"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires a real/emulated device reachable via adb",
+]
+testpaths = ["tests"]
+timeout = 10
+
+[tool.coverage.run]
+include = ["apkpull/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def __repr__",
+    "\\.\\.\\.",
+]
