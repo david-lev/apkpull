@@ -1,7 +1,10 @@
-<h2 align="center">
-  <img src="https://raw.githubusercontent.com/david-lev/apkpull/main/assets/logo.svg" width="40" height="40" alt="apkpull logo"/>
-  <a href="https://github.com/david-lev/apkpull">apkpull</a> • Download Android apps from Google Play as one installable bundle
-</h2>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/david-lev/apkpull/main/assets/logo.svg" width="72" height="72" alt="apkpull logo"/>
+</p>
+
+<h2 align="center"><a href="https://github.com/david-lev/apkpull">apkpull</a></h2>
+
+<p align="center">Download Android apps from Google Play as one installable bundle</p>
 
 <p align="center">
   <a href="https://pypi.org/project/apkpull/"><img src="https://img.shields.io/pypi/v/apkpull?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
