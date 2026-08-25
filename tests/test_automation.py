@@ -42,7 +42,10 @@ def build(
     if pm_path is not None:
         adb.shell_responses[f"pm path {package}"] = pm_path
     if dumps is not None:
-        adb.shell_responses["cat /sdcard/window_dump.xml"] = dumps
+        adb.shell_responses[
+            "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+            "cat /sdcard/window_dump.xml"
+        ] = dumps
     device = Device(adb, "fake-1")
     automator = PlayStoreAutomator(
         device, LOCALES["en"], AutomationConfig(poll_interval=0, max_rounds=max_rounds)
@@ -109,7 +112,10 @@ def test_start_install_ignores_sign_in_text_when_locale_lacks_it():
     dump = make_dump(("Sign in", (0, 0, 100, 50)))
     adb = FakeAdb()
     adb.shell_responses["dumpsys window"] = PLAY_FOCUSED
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [dump]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [dump]
     automator = PlayStoreAutomator(
         Device(adb, "fake-1"),
         buttons_without_sign_in,
@@ -208,7 +214,10 @@ def test_start_update_taps_and_reports_tracking_needed():
     adb.shell_responses["dumpsys package com.app"] = lambda: (
         f"versionCode={next(versions, 100)} versionName=1.0"
     )
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [UPDATE]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [UPDATE]
     device = Device(adb, "fake-1")
     automator = PlayStoreAutomator(
         device, LOCALES["en"], AutomationConfig(poll_interval=0, max_rounds=5)
@@ -225,7 +234,10 @@ def test_start_update_reports_done_when_update_finishes_instantly():
     adb.shell_responses["dumpsys package com.app"] = lambda: (
         f"versionCode={next(versions, 101)} versionName=1.0"
     )
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [UPDATE]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [UPDATE]
     device = Device(adb, "fake-1")
     automator = PlayStoreAutomator(
         device, LOCALES["en"], AutomationConfig(poll_interval=0, max_rounds=5)

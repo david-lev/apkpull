@@ -18,84 +18,77 @@ from apkpull.bundle import (
 from apkpull.exceptions import VerificationError
 
 
-def test_build_apks_bundle_writes_base_and_splits_and_meta(tmp_path):
+def test_build_apks_bundle_writes_base_and_meta(tmp_path, politedroid_bytes):
     base = tmp_path / "base.apk"
-    base.write_bytes(b"base-bytes")
-    split = tmp_path / "config.en.apk"
-    split.write_bytes(b"split-bytes")
+    base.write_bytes(politedroid_bytes)
     dest = tmp_path / "out.apks"
 
-    build_apks_bundle(
-        base_path=base,
-        split_paths=[split],
-        dest_path=dest,
-        package="com.app",
-        version_code=5,
-        version_name="1.0",
-        app_name="App",
-        min_sdk_version=21,
-        target_sdk_version=34,
-    )
+    build_apks_bundle(base_path=base, split_paths=[], dest_path=dest)
 
     assert dest.is_file()
     assert not dest.with_name(dest.name + ".tmp").exists()
     with zipfile.ZipFile(dest) as zf:
-        assert set(zf.namelist()) == {BASE_NAME, "config.en.apk", META_NAME}
-        assert zf.read(BASE_NAME) == b"base-bytes"
-        assert zf.read("config.en.apk") == b"split-bytes"
+        assert set(zf.namelist()) == {BASE_NAME, META_NAME}
+        assert zf.read(BASE_NAME) == politedroid_bytes
         meta = json.loads(zf.read(META_NAME))
     assert meta == {
-        "package": "com.app",
-        "label": "App",
-        "version_code": 5,
+        "package": "com.politedroid",
+        "label": "Polite Droid",
+        "version_code": 4,
         "meta_version": 2,
-        "version_name": "1.0",
-        "min_sdk": 21,
-        "target_sdk": 34,
+        "version_name": "1.3",
+        "min_sdk": 3,
     }
 
 
-def test_build_apks_bundle_omits_none_optional_fields(tmp_path):
+def test_build_apks_bundle_writes_splits_under_their_original_filenames(
+    tmp_path, politedroid_bytes, test_debug_bytes, force_splits
+):
     base = tmp_path / "base.apk"
-    base.write_bytes(b"x")
+    base.write_bytes(politedroid_bytes)
+    split = tmp_path / "config.en.apk"
+    split.write_bytes(test_debug_bytes)
     dest = tmp_path / "out.apks"
 
-    build_apks_bundle(
-        base_path=base,
-        split_paths=[],
-        dest_path=dest,
-        package="com.app",
-        version_code=1,
-        version_name=None,
-        app_name="App",
-        min_sdk_version=None,
-        target_sdk_version=None,
-    )
+    with force_splits(split):
+        build_apks_bundle(base_path=base, split_paths=[split], dest_path=dest)
+
+    with zipfile.ZipFile(dest) as zf:
+        assert set(zf.namelist()) == {BASE_NAME, "config.en.apk", META_NAME}
+        assert zf.read("config.en.apk") == test_debug_bytes
+
+
+def test_build_apks_bundle_omits_none_optional_fields(tmp_path, test_debug_bytes):
+    base = tmp_path / "base.apk"
+    base.write_bytes(test_debug_bytes)
+    dest = tmp_path / "out.apks"
+
+    build_apks_bundle(base_path=base, split_paths=[], dest_path=dest)
 
     with zipfile.ZipFile(dest) as zf:
         meta = json.loads(zf.read(META_NAME))
-    assert meta.keys() == {"package", "label", "version_code", "meta_version"}
+    # test-debug.apk has no min_sdk/target_sdk in its manifest
+    assert meta.keys() == {
+        "package",
+        "label",
+        "version_code",
+        "meta_version",
+        "version_name",
+    }
 
 
-def test_build_apks_bundle_replaces_existing_file_atomically(tmp_path):
+def test_build_apks_bundle_replaces_existing_file_atomically(
+    tmp_path, politedroid_bytes
+):
     base = tmp_path / "base.apk"
-    base.write_bytes(b"new")
+    base.write_bytes(politedroid_bytes)
     dest = tmp_path / "out.apks"
     dest.write_bytes(b"stale-content")
 
-    build_apks_bundle(
-        base_path=base,
-        split_paths=[],
-        dest_path=dest,
-        package="com.app",
-        version_code=1,
-        version_name=None,
-        app_name="App",
-        min_sdk_version=None,
-        target_sdk_version=None,
-    )
+    build_apks_bundle(base_path=base, split_paths=[], dest_path=dest)
+
     with zipfile.ZipFile(dest) as zf:
-        assert zf.read(BASE_NAME) == b"new"
+        assert zf.read(BASE_NAME) == politedroid_bytes
 
 
 def _apks_ctor(*, package_name="com.app", version_code=5, splits=()):

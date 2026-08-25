@@ -276,8 +276,14 @@ def run_for_device(
     skip_update_check: bool = False,
     force_locale: str | None = None,
     on_progress: ProgressCallback | None = None,
+    device_info: DeviceInfo | None = None,
 ) -> tuple[list[DeviceOutcome], list[_PendingContribution]]:
     device = Device(adb, device_id)
+    if device_info is not None:
+        # Already resolved once by _warn_about_duplicate_devices, right before
+        # the thread pool was created -- reuse it instead of re-issuing the
+        # same getprop/locale round trip a second time for this device.
+        device.seed_info(device_info)
     start = time.monotonic()
     stay_on_previous: str | None = None
     locale_override_active = False
@@ -554,11 +560,19 @@ def run_for_device(
     return outcomes, pending
 
 
-def _warn_about_duplicate_devices(adb: AdbClient, targets: list[str]) -> None:
+def _warn_about_duplicate_devices(
+    adb: AdbClient, targets: list[str]
+) -> dict[str, DeviceInfo]:
     """Group targeted devices by the properties that decide which apk/splits
     Google Play serves and log a warning when that grouping suggests redundant
     work — either the same download twice, or one download needlessly split
-    across devices."""
+    across devices.
+
+    Returns whatever :class:`DeviceInfo` this managed to resolve, keyed by
+    ``device_id`` — ``run()`` hands each one to its device's own
+    ``run_for_device`` call so that thread doesn't redundantly re-fetch the
+    same ``getprop``/locale round trip a second time for the same device.
+    """
     infos: list[DeviceInfo] = []
     for device_id in targets:
         device = Device(adb, device_id)
@@ -625,6 +639,8 @@ def _warn_about_duplicate_devices(adb: AdbClient, targets: list[str]) -> None:
                 breakdown,
                 ",".join(union) or "unknown",
             )
+
+    return {info.device_id: info for info in infos}
 
 
 def _merge_pending_contributions(
@@ -793,6 +809,39 @@ def _merge_pending_contributions(
                 shutil.rmtree(group_dir, ignore_errors=True)
 
 
+def _drain_batch(
+    done: set,
+    outcomes: list[DeviceOutcome],
+    all_contributions: list[_PendingContribution],
+) -> list[Exception]:
+    """Collect every finished future in ``done`` into ``outcomes``/
+    ``all_contributions``, in place.
+
+    ``done`` (from ``concurrent.futures.wait``) is an *unordered* set, so an
+    unexpected exception from one device's future must not stop a sibling
+    future's already-computed result -- also sitting right there in the same
+    batch -- from being collected: any exception raised by ``future.result()``
+    (a genuine bug in ``run_for_device``, not a ``DeviceError`` it already
+    turned into a normal error outcome -- those never raise) is collected and
+    returned instead of raised immediately, so every future in the batch is
+    always drained first. A future ``run()`` itself already cancelled (see
+    the ``KeyboardInterrupt`` handling below) is skipped rather than treated
+    as an error.
+    """
+    exceptions: list[Exception] = []
+    for future in done:
+        if future.cancelled():
+            continue
+        try:
+            device_outcomes, contributions = future.result()
+        except Exception as exc:  # noqa: BLE001 - returned to the caller, not swallowed
+            exceptions.append(exc)
+            continue
+        outcomes.extend(device_outcomes)
+        all_contributions.extend(contributions)
+    return exceptions
+
+
 def run(
     packages: str | list[str],
     dest_root: Path,
@@ -837,8 +886,9 @@ def run(
     logger.info(
         "%d device(s) targeted, %d package(s) each.", len(targets), len(package_list)
     )
+    device_infos: dict[str, DeviceInfo] = {}
     if len(targets) > 1 and not skip_duplicate_check:
-        _warn_about_duplicate_devices(adb, targets)
+        device_infos = _warn_about_duplicate_devices(adb, targets)
 
     if on_progress:
         # Device label isn't known yet (that needs a live adb round-trip,
@@ -883,6 +933,7 @@ def run(
             skip_update_check=skip_update_check,
             force_locale=force_locale,
             on_progress=on_progress,
+            device_info=device_infos.get(device_id),
         ): device_id
         for device_id in targets
     }
@@ -895,10 +946,25 @@ def run(
             # would otherwise do nothing until every device finished or timed
             # out on its own, which could be minutes away.
             done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
-            for future in done:
-                device_outcomes, contributions = future.result()
-                outcomes.extend(device_outcomes)
-                all_contributions.extend(contributions)
+            exceptions = _drain_batch(done, outcomes, all_contributions)
+            if exceptions:
+                # A genuine bug in run_for_device, not a per-device DeviceError
+                # (those never reach here as an exception). Shut down the same
+                # way Ctrl+C does below -- cancel whatever hasn't started,
+                # wait for whatever's already running (can't be force-killed,
+                # but is bounded by its own timeouts), close the pool -- so
+                # this doesn't abandon still-running device threads or lose
+                # any sibling device's already-collected result, then surface
+                # the failure instead of silently dropping it.
+                for future in pending:
+                    future.cancel()
+                while pending:
+                    done, pending = wait(
+                        pending, timeout=1.0, return_when=FIRST_COMPLETED
+                    )
+                    exceptions.extend(_drain_batch(done, outcomes, all_contributions))
+                pool.shutdown(wait=False)
+                raise exceptions[0]
         pool.shutdown(wait=False)
     except KeyboardInterrupt:
         for future in pending:
@@ -911,11 +977,15 @@ def run(
         )
         while pending:
             done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
-            for future in done:
-                if not future.cancelled():
-                    device_outcomes, contributions = future.result()
-                    outcomes.extend(device_outcomes)
-                    all_contributions.extend(contributions)
+            for exc in _drain_batch(done, outcomes, all_contributions):
+                # Same "don't lose the rest of the batch" reasoning as the
+                # normal path above -- but here the original KeyboardInterrupt
+                # is what must keep propagating (the `raise` at the end of
+                # this block), so an unexpected exception from a straggling
+                # future is logged rather than re-raised in its place.
+                logger.error(
+                    "Unexpected error from a device thread during shutdown: %s", exc
+                )
         pool.shutdown(wait=False)
         # Still merge whatever raw pulls did finish before the interrupt --
         # strictly better than leaving them staged and unused, and it's pure

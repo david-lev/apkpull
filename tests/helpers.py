@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
+
+from apkpull.bundle import BASE_NAME
+
+_DATA_DIR = Path(__file__).parent / "data" / "apk"
+POLITEDROID_BYTES = (_DATA_DIR / "politedroid.apk").read_bytes()
+TEST_DEBUG_BYTES = (_DATA_DIR / "test-debug.apk").read_bytes()
 
 
 def make_dump(*texts_and_bounds: tuple[str, tuple[int, int, int, int]]) -> str:
@@ -59,6 +66,12 @@ class FakeAdb:
         self.pulled: list[tuple[str, Path]] = []
         self.connected = True
         self.state = "device"
+        # ApksFile.create() (invoked by build_apks_bundle()) re-parses every pulled
+        # apk for real, so base/split pulls need to land real, valid apk bytes on
+        # disk -- OBB pulls don't, since nothing ever parses those.
+        self.base_apk_bytes = POLITEDROID_BYTES
+        self.split_apk_bytes = TEST_DEBUG_BYTES
+        self.obb_bytes = b"FAKE-OBB-CONTENT"
 
     # -- discovery --------------------------------------------------------
 
@@ -97,7 +110,12 @@ class FakeAdb:
         timeout: float = 300.0,
     ) -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(b"FAKE-APK-CONTENT")
+        if local_path.suffix == ".obb":
+            local_path.write_bytes(self.obb_bytes)
+        elif local_path.name == BASE_NAME:
+            local_path.write_bytes(self.base_apk_bytes)
+        else:
+            local_path.write_bytes(self.split_apk_bytes)
         self.pulled.append((remote_path, local_path))
 
     def exec_out_to_file(
@@ -105,3 +123,22 @@ class FakeAdb:
     ) -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(b"FAKE-PNG")
+
+
+def configure_apks_create(apks_ctor) -> None:
+    """For tests that fully mock ``apkpull.bundle.ApksFile`` (both the
+    ``ApksFile(path)`` constructor ``verify_bundle`` uses and the
+    ``ApksFile.create()`` classmethod ``build_apks_bundle`` uses): give
+    ``.create()`` a side effect that actually writes a (trivially valid,
+    empty) zip to the requested output path, mirroring ``apks_ctor``'s
+    return value. Without this, ``build_apks_bundle``'s tmp-file rename
+    into place raises ``FileNotFoundError`` since a bare ``MagicMock``
+    ``.create()`` call has no on-disk effect at all.
+    """
+
+    def _create(apks, output_path, **kwargs):
+        with zipfile.ZipFile(output_path, "w"):
+            pass
+        return apks_ctor.return_value
+
+    apks_ctor.create.side_effect = _create

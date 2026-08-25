@@ -1,4 +1,4 @@
-<h2 align="center">📱 <a href="https://github.com/david-lev/apkpull">apkpull</a> • Pull Android apps off Google Play, across any number of devices</h2>
+<h2 align="center">📱 <a href="https://github.com/david-lev/apkpull">apkpull</a> • Download Android apps from Google Play as one installable bundle</h2>
 
 <p align="center">
   <a href="https://pypi.org/project/apkpull/"><img src="https://img.shields.io/pypi/v/apkpull?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
@@ -10,10 +10,16 @@
   <a href="https://www.codefactor.io/repository/github/david-lev/apkpull/overview/main"><img src="https://www.codefactor.io/repository/github/david-lev/apkpull/badge/main" alt="Code Quality"/></a>
 </p>
 
-**apkpull automates downloading apps from Google Play — install/update via real UI automation, then pull a single
-installable `.apks` bundle (base + splits) to your machine, verified with [apkfile](https://github.com/david-lev/apkfile).**
+**apkpull drives Google Play like a person would** — installs or updates an app on real, adb-connected devices or
+emulators, then pulls the base APK and every split into one verified, installable `.apks` bundle, powered by
+[apkfile](https://github.com/david-lev/apkfile). Point it at several devices at once and it merges their splits
+into a single artifact anyone can install, whatever their phone's CPU, screen, or language.
 
-Runs against any number of adb-connected real devices or emulators at once.
+```bash
+apkpull com.whatsapp                                        # pull one app from every connected device
+apkpull com.whatsapp,com.spotify.music -d ~/Apps            # pull several apps, into a custom folder
+apkpull com.whatsapp --devices emulator-5554,emulator-5556  # merge splits from two devices into one bundle
+```
 
 ## Install
 
@@ -26,6 +32,37 @@ uv add apkpull            # ...or as a dependency, to use it as a library (see "
 
 Requires Python 3.10+ and [ADB](https://developer.android.com/studio/command-line/adb) on your `PATH`. That's it —
 `apkpull com.whatsapp` is ready to run. See [Development](#development) below for setting up a local clone instead.
+
+## Why run more than one device?
+
+Google Play doesn't hand out one universal APK — every install is built from a **base APK** plus a handful of
+**splits**, chosen to match that specific device: its CPU architecture (ABI), screen density, and every language
+it has configured. Pull from a single phone and you only get *that phone's* splits — perfectly installable on that
+phone, but potentially missing pieces someone else's phone needs: a different ABI, a higher-density screen, a
+language you don't happen to have installed.
+
+apkpull's answer is to run against several devices at once and merge the *union* of everything they each pulled
+into one bundle (see [Cross-device merging](#cross-device-merging) below) — so instead of "the splits my phone
+happened to get," you end up with "every split any of these devices got," installable by a much wider set of real
+phones. Three cheap emulators (or devices) get you almost all the way there:
+
+- **Two ABIs** — one `armeabi-v7a` (32-bit) and one `arm64-v8a` (64-bit). Between them they cover virtually every
+  Android phone in the wild; skip `x86`/`x86_64` unless you specifically care about Chromebooks or x86 tablets,
+  which few apps bother splitting for anyway.
+- **Two screen densities** — Android buckets every real screen into one of a handful of density tiers
+  (`ldpi`/`mdpi`/`hdpi`/`xhdpi`/`xxhdpi`/`xxxhdpi`), and Play only ever serves the one closest to a device's actual
+  dpi. **xxhdpi (~480dpi)** and **xxxhdpi (~640dpi)** between them cover most phones sold in the last several
+  years, from mid-range through current flagships — set one emulator's AVD screen density to each.
+- **As many languages as possible, all on one device** — Play fetches one split per *installed* language, so
+  running a separate device per language is wasted effort. Add every language you care about to a single device
+  (Settings → System → Languages) instead, and one pull covers all of them — apkpull already unions a device's
+  *full* configured language list into the bundle, not just its primary locale.
+
+This is also exactly what apkpull's own duplicate-device detection is built around: two devices that agree on ABI,
+density bucket, SDK, and configured languages will just pull the same files twice, so apkpull warns about it (but
+still processes both); two devices that agree on everything *except* language get flagged too, with a suggestion
+to fold them into one multi-language device instead — precisely the setup recommended above. See
+[Duplicate/redundant devices](#reliability) below for the exact mechanics.
 
 ## Setting up a device or emulator
 
@@ -154,9 +191,9 @@ usage: apkpull [-h] [-d DIR] [--uninstall-after] [--devices ID1,ID2,...]
   --skip-update-check   For an already-installed package, pull whatever's currently on
                         the device instead of checking Google Play for an update first
                         (see below) — faster, but may pull a stale version.
-  --no-live             Don't show the live per-device/per-package status table (see
-                        below) — just plain, unbounded log lines. Automatic when stderr
-                        isn't a real terminal.
+  --no-live             Don't show the live per-device/per-package status table — just
+                        plain, unbounded log lines. Automatic when stderr isn't a real
+                        terminal.
   --adb-path PATH       Path to the adb executable (default: search PATH).
   --json                Print the run summary as JSON instead of text.
   -v, -vv               Verbose logging: -v for info, -vv for debug.
@@ -164,47 +201,6 @@ usage: apkpull [-h] [-d DIR] [--uninstall-after] [--devices ID1,ID2,...]
 
 Exit code is `0` when every targeted device succeeds, otherwise the number of failed devices (capped at `9`); `50`
 if no devices were found at all.
-
-### Live terminal UI
-
-On a real terminal, apkpull shows a live-updating table per package instead of scrolling log lines — one row per
-device pulling that package, its current pipeline stage, and elapsed time, redrawing in place as things progress:
-
-```
-com.whatsapp
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
-┃ Device                                    ┃ Status                               ┃ Elapsed ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ 📱 Pixel 7  (arm64-v8a, en-US)            │ 📥 Pulling config.xxhdpi.apk (8.0M)  │    0:14 │
-│ 📱 sdk_gphone64_arm64  (arm64-v8a, en-US) │ 🔒 Locked, please unlock…            │    0:33 │
-└─────────────────────────────────────────────┴───────────────────────────────────┴─────────┘
-com.spotify.music
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
-┃ Device                                    ┃ Status                               ┃ Elapsed ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ 📱 Pixel 7  (arm64-v8a, en-US)            │ 🔄 Updating…                         │    0:04 │
-│ 📱 sdk_gphone64_arm64  (arm64-v8a, en-US) │ ⏳ Queued                             │       — │
-└─────────────────────────────────────────────┴───────────────────────────────────┴─────────┘
-1/4 complete
-```
-
-Status reflects what's actually happening, not just a generic "downloading" — "Updating…" vs "Downloading…"
-depending on whether the app is already installed, "Locked, please unlock…" while waiting on a locked device, and
-on success either "Installed"/"Updated" when the device state genuinely changed this run or "Pulled" when it didn't
-(already up to date, or `--skip-update-check`).
-
-Built with [rich](https://github.com/Textualize/rich): `orchestrator.py`/`puller.py`/`automation.py` know nothing
-about how (or whether) this is rendered — they just call an optional `report(package, stage, detail)` closure at
-each pipeline transition (connecting → \[locked\] → queued → opening Play Store → downloading/updating → pulling
-*(per file)* → packaging → verifying → uninstalling → done/error), defined in `apkpull/progress.py`; `apkpull/tui.py`
-is the only module that turns those events into the actual display. Every device/package row stays in its table for
-the whole run, even once it's done or errored, so the table is always a complete, stable record — nothing
-disappears as work finishes. Warnings, errors, and `-v`/`-vv` logs are routed through the same rich console, so they
-print as normal scrolling lines above the table instead of corrupting it. Automatically skipped (falling back to
-plain, unbounded log lines) when stderr isn't a real terminal (piped, CI); `--no-live` forces it off explicitly —
-worth reaching for on a run with enough devices/packages that the table would no longer fit the terminal, since
-past that point every redraw has to scroll a little further just to redisplay it, which will eventually carry
-earlier output (including those warnings) out of scrollback.
 
 ## As a library
 
@@ -225,18 +221,20 @@ for outcome in summary.outcomes:
 
 ## How it works
 
-- Because Google Play's UI exposes no stable resource-ids on its buttons (verified by dumping the live UI tree —
-  every text node's `resource-id` is empty), apkpull drives the Play Store app the same way a human would: dump
-  the screen with `uiautomator`, find a button by its (localized) text, tap its coordinates. English, Hebrew,
-  Spanish, French and Russian are built in; add a language by extending the table in `apkpull/locales.py` —
-  `scripts/extract_play_strings.sh` helps bootstrap most of a new locale's strings straight from Google Play's
-  own APK (see its header comment for how, and its limits).
-- Each connected device is handled on its own thread, so multiple devices — potentially with different
-  architectures/splits/languages — download and pull in parallel. This is also how apkpull builds a genuinely
-  universal artifact: it waits for every targeted device to finish a package, then merges the union of all their
-  distinct splits into one bundle, so a package pulled from an arm64 + English device and an x86_64 + Hebrew
-  device ends up as a single `.apks` installable anywhere via SAI — not two separate, incomplete ones (see
-  "Cross-device merging" below).
+- **Why UI automation, and why text instead of resource-ids or coordinates**: apkpull needs *something* stable to
+  find a button on. Raw screen coordinates break the moment the layout shifts — a different screen size, or Play
+  Store itself pushing an update that reflows a screen; resource-ids would be the normal fix for that, but Google
+  Play's own UI exposes none on its buttons at all — confirmed by dumping the live UI tree, every text node's
+  `resource-id` comes back empty. What *is* stable is a button's visible, localized text, so that's what apkpull
+  matches on: dump the screen with `uiautomator`, find a node by its text for the device's language, tap its
+  bounds — the same way a person would. English, Hebrew, Spanish, French and Russian are built in; add a language
+  by extending the table in `apkpull/locales.py` — `scripts/extract_play_strings.sh` helps bootstrap most of a new
+  locale's strings straight from Google Play's own APK (see its header comment for how, and its limits).
+- Each connected device runs on its own thread, so multiple devices — potentially with different
+  architectures/densities/languages — download and pull in parallel. apkpull waits for every targeted device to
+  finish a given package, then merges the union of all their distinct splits into one bundle (see
+  ["Why run more than one device?"](#why-run-more-than-one-device) above and
+  [Cross-device merging](#cross-device-merging) below) instead of one incomplete bundle per device.
 - Multiple packages on the *same* device also download concurrently rather than one at a time: apkpull briefly
   visits each package's Play Store page just long enough to tap Install/Update, then tracks every in-flight
   package purely over adb (`pm path`/`dumpsys package`) and pulls each as it finishes — no UI polling involved,
@@ -357,14 +355,17 @@ previous one crashed before cleaning up its own.
   to `--download-retries` times (default 1) before reporting it as failed, so one stuck download can't hang a
   device — or, with `0`/no other in-flight packages, the whole run — forever.
 - **Duplicate/redundant devices**: when targeting more than one device, apkpull warns (but still processes every
-  device) about two kinds of overlap, based on the properties Google Play actually uses to pick which apk/splits
-  to serve — ABI, screen density *bucket*, SDK version, and the *full set* of languages configured on the device
-  (not just the primary one — Play fetches a language split per installed language):
-    - Devices matching on **all four** will likely download byte-identical files — running more than one is
-      probably redundant.
+  device) about two kinds of overlap, based on the exact properties Google Play actually uses to pick which
+  apk/splits to serve — ABI, screen density *bucket*, SDK version, and the *full set* of languages configured on
+  the device (not just the primary one — Play fetches a language split per installed language, so a device with
+  three languages configured contributes three language splits, not one):
+    - Devices matching on **all four** will download byte-identical files — a straightforward waste, since running
+      one of them would produce the exact same contribution to the merged bundle as running both.
     - Devices matching on ABI/density/SDK but with **different configured languages** will each pull different
-      language splits, but redundantly re-pull the shared base/abi/density splits to get there — apkpull suggests
-      configuring every language on a single device instead, so one pull covers all of them.
+      language splits, but redundantly re-pull the shared base/ABI/density splits to get there — apkpull suggests
+      configuring every language on a single device instead (see
+      ["Why run more than one device?"](#why-run-more-than-one-device) above), so one pull covers all of them
+      without repeating the shared splits per language.
 
   Density is compared by *bucket* (`ldpi`/`mdpi`/`tvdpi`/`hdpi`/`xhdpi`/`xxhdpi`/`xxxhdpi` — Play only ever serves
   one of these, never a device's exact raw dpi), not the raw `ro.sf.lcd_density` value, using `apkfile`'s
@@ -373,7 +374,8 @@ previous one crashed before cleaning up its own.
   duplicates and flag devices whose difference doesn't actually matter.
 
   `--skip-duplicate-check` turns this off entirely (no warning, and no extra per-device `getprop` round-trip to
-  check for one) for setups where the overlap is intentional.
+  check for one) for setups where the overlap is intentional — e.g. deliberately running two identical devices
+  just to compare timing, or a fleet where every device really is meant to be a like-for-like clone.
 - Run with `-vv` to see every adb call and UI-polling decision. If automation gets stuck (an unrecognized screen
   after `--max-poll-rounds` polls), a screenshot + UI dump are saved for a bug report (path logged at the time).
 

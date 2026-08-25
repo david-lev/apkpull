@@ -1,4 +1,5 @@
 from apkpull.device import Device
+from apkpull.models import DeviceInfo
 
 from .helpers import FakeAdb
 
@@ -24,6 +25,18 @@ def test_info_parses_getprop_output():
     assert info.sdk == 34
     assert info.density == 420
     assert info.density_bucket == "xxhdpi"
+
+
+def test_seed_info_avoids_a_getprop_round_trip():
+    """seed_info() lets a caller that already resolved a device's info
+    elsewhere (see orchestrator.py's duplicate-device check) hand it to a
+    fresh Device instance instead of paying for the same getprop/locale
+    round trip a second time."""
+    device, adb = make_device(getprop="[ro.product.model]: [Should Not Be Read]\n")
+    seeded = DeviceInfo(device_id="fake-1", model="Seeded")
+    device.seed_info(seeded)
+    assert device.info() is seeded
+    assert "getprop" not in adb.shell_log
 
 
 def test_info_falls_back_to_qemu_density_prop():
@@ -192,15 +205,18 @@ def test_focused_window_empty_when_field_absent():
     assert device.focused_window() == ""
 
 
-def test_dump_ui_clears_then_dumps_then_cats():
-    device, adb = make_device(**{"cat /sdcard/window_dump.xml": "<hierarchy/>"})
+def test_dump_ui_clears_dumps_and_cats_in_one_combined_shell_call():
+    """Clear/dump/cat are joined into a single ``adb shell`` round-trip (see
+    ``Device.dump_ui``) instead of three separate ones -- this runs on every
+    automation poll, for every device, so the subprocess overhead adds up."""
+    combined = (
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    )
+    device, adb = make_device(**{combined: "<hierarchy/>"})
     result = device.dump_ui()
     assert result == "<hierarchy/>"
-    assert adb.shell_log == [
-        "rm -f /sdcard/window_dump.xml",
-        "uiautomator dump",
-        "cat /sdcard/window_dump.xml",
-    ]
+    assert adb.shell_log == [combined]
 
 
 def test_tap_sends_input_tap_with_coords():

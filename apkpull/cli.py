@@ -19,7 +19,7 @@ from .automation import AutomationConfig
 from .exceptions import ApkPullError
 from .locales import supported_languages
 from .logging_setup import setup_logging
-from .models import OutputFormat
+from .models import FileKind, OutputFormat
 from .orchestrator import run as run_pull
 from .tui import LiveDisplay
 
@@ -256,6 +256,10 @@ def _print_summary(summary) -> None:
             f"[{icon}] {outcome.device.label} / {outcome.package}: {outcome.status.value}"
             + (f" - {outcome.error}" if outcome.error else "")
         )
+        for pulled in outcome.pulled_files:
+            if pulled.kind == FileKind.OBB:
+                size_mb = pulled.size_bytes / 1024 / 1024
+                print(f"     OBB: {pulled.name} ({size_mb:.1f} MB)")
     print(f"\n{summary.successful}/{summary.total} successful operations!")
 
 

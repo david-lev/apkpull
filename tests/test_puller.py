@@ -106,11 +106,16 @@ def test_single_apk_pull_produces_a_named_bundle(tmp_path):
     with zipfile.ZipFile(bundle.local_path) as zf:
         assert set(zf.namelist()) == {"base.apk", "meta.sai_v2.json"}
         meta = json.loads(zf.read("meta.sai_v2.json"))
-        assert meta["package"] == "com.app"
-        assert meta["version_code"] == 41
+        # com.app/41 is dumpsys-reported and drives the target *filename* --
+        # meta.sai_v2.json's package/version_code come from re-parsing the
+        # real base.apk bytes FakeAdb staged (politedroid.apk, by default).
+        assert meta["package"] == "com.politedroid"
+        assert meta["version_code"] == 4
 
 
-def test_split_apk_pull_bundles_base_and_splits_into_one_apks_file(tmp_path):
+def test_split_apk_pull_bundles_base_and_splits_into_one_apks_file(
+    tmp_path, force_splits
+):
     pm_path = (
         "package:/data/app/com.app-x/base.apk\n"
         "package:/data/app/com.app-x/split_config.arm64_v8a.apk\n"
@@ -119,7 +124,10 @@ def test_split_apk_pull_bundles_base_and_splits_into_one_apks_file(tmp_path):
     puller, _adb = make_puller(
         tmp_path, dumpsys="versionCode=451 versionName=1.0", pm_path=pm_path
     )
-    with _patched_apk_file(version_code=451):
+    with (
+        _patched_apk_file(version_code=451),
+        force_splits(where=lambda p: p.name != "base.apk"),
+    ):
         _, files, _, _ = pull_and_build(puller, "com.app", verify=False)
 
     bundle = files[0]
@@ -288,7 +296,9 @@ def test_pull_raw_stages_obb_into_staging_when_bundle_not_yet_built(tmp_path):
 # -- build_merged_bundle() -- the core cross-device merge surface ---------------------------
 
 
-def test_build_merged_bundle_unions_distinct_splits_from_two_devices(tmp_path):
+def test_build_merged_bundle_unions_distinct_splits_from_two_devices(
+    tmp_path, force_splits
+):
     """The direct regression test for the reported bug: two devices with
     genuinely different splits (arm64/en vs x86_64/he) must both end up in
     the final bundle, not just whichever pulled first."""
@@ -316,13 +326,14 @@ def test_build_merged_bundle_unions_distinct_splits_from_two_devices(tmp_path):
         raw_a = puller_a.pull_raw("com.app")
         raw_b = puller_b.pull_raw("com.app")
 
-    target, files = build_merged_bundle(
-        "com.app",
-        100,
-        sorted([raw_a, raw_b], key=lambda r: r.device_id),
-        tmp_path,
-        verify=False,
-    )
+    with force_splits(where=lambda p: p.name != "base.apk"):
+        target, files = build_merged_bundle(
+            "com.app",
+            100,
+            sorted([raw_a, raw_b], key=lambda r: r.device_id),
+            tmp_path,
+            verify=False,
+        )
 
     bundle = next(f for f in files if f.kind == FileKind.BUNDLE)
     assert bundle.local_path == target
@@ -339,9 +350,9 @@ def test_build_merged_bundle_unions_distinct_splits_from_two_devices(tmp_path):
 
 
 def test_build_merged_bundle_dedupes_identical_split_filenames_keeping_first_by_device_id(
-    tmp_path,
+    tmp_path, force_splits, politedroid_bytes, test_debug_bytes
 ):
-    puller_a, _adb_a = make_puller(
+    puller_a, adb_a = make_puller(
         tmp_path,
         device_id="dev-a",
         dumpsys="versionCode=100 versionName=1.0",
@@ -349,7 +360,7 @@ def test_build_merged_bundle_dedupes_identical_split_filenames_keeping_first_by_
             "package:/data/app/x/base.apk\npackage:/data/app/x/split_config.en.apk\n"
         ),
     )
-    puller_b, _adb_b = make_puller(
+    puller_b, adb_b = make_puller(
         tmp_path,
         device_id="dev-b",
         dumpsys="versionCode=100 versionName=1.0",
@@ -357,50 +368,53 @@ def test_build_merged_bundle_dedupes_identical_split_filenames_keeping_first_by_
             "package:/data/app/x/base.apk\npackage:/data/app/x/split_config.en.apk\n"
         ),
     )
+    # Shouldn't happen for a real device pair (same split filename should mean
+    # identical content for the same version_code) -- using two different real
+    # fixture apks here is only to prove which contribution wins the tiebreak
+    # (the winner's actual split bytes end up in the bundle).
+    adb_a.split_apk_bytes = politedroid_bytes
+    adb_b.split_apk_bytes = test_debug_bytes
     with _patched_apk_file(version_code=100):
         raw_a = puller_a.pull_raw("com.app")
         raw_b = puller_b.pull_raw("com.app")
 
-    # Shouldn't happen for a real device pair (same split filename should mean
-    # identical content for the same version_code) -- writing different bytes
-    # here is only to prove which contribution wins the tiebreak.
-    raw_a.split_paths[0].write_bytes(b"FROM-DEV-A")
-    raw_b.split_paths[0].write_bytes(b"FROM-DEV-B")
-
-    target, _files = build_merged_bundle(
-        "com.app",
-        100,
-        sorted([raw_a, raw_b], key=lambda r: r.device_id),
-        tmp_path,
-        verify=False,
-    )
+    with force_splits(where=lambda p: p.name != "base.apk"):
+        target, _files = build_merged_bundle(
+            "com.app",
+            100,
+            sorted([raw_a, raw_b], key=lambda r: r.device_id),
+            tmp_path,
+            verify=False,
+        )
     with zipfile.ZipFile(target) as zf:
         assert zf.namelist().count("config.en.apk") == 1
-        assert zf.read("config.en.apk") == b"FROM-DEV-A"  # dev-a sorts first
+        assert zf.read("config.en.apk") == politedroid_bytes  # dev-a sorts first
 
 
-def test_build_merged_bundle_uses_first_devices_base_apk_and_metadata(tmp_path):
-    puller_a, _adb_a = make_puller(
+def test_build_merged_bundle_uses_first_devices_base_apk_and_metadata(
+    tmp_path, politedroid_bytes, test_debug_bytes
+):
+    """ApksFile.create() derives the whole manifest by re-parsing whichever
+    contribution's base_path is primary -- there's no separate metadata
+    channel to inject fake per-device values into anymore, so this proves
+    the real post-refactor behavior with two genuinely different base apks:
+    dev-a's actual base-apk content is what ends up in the bundle."""
+    puller_a, adb_a = make_puller(
         tmp_path,
         device_id="dev-a",
         dumpsys="versionCode=100 versionName=1.0",
         pm_path="package:/data/app/x/base.apk\n",
     )
-    puller_b, _adb_b = make_puller(
+    puller_b, adb_b = make_puller(
         tmp_path,
         device_id="dev-b",
         dumpsys="versionCode=100 versionName=1.0",
         pm_path="package:/data/app/x/base.apk\n",
     )
-    with patch(
-        "apkpull.puller.ApkFile",
-        side_effect=[
-            fake_apk(labels={"": "App A"}),
-            fake_apk(labels={"": "App B"}),
-        ],
-    ):
-        raw_a = puller_a.pull_raw("com.app")
-        raw_b = puller_b.pull_raw("com.app")
+    adb_a.base_apk_bytes = politedroid_bytes
+    adb_b.base_apk_bytes = test_debug_bytes
+    raw_a = puller_a.pull_raw("com.app")
+    raw_b = puller_b.pull_raw("com.app")
 
     target, _files = build_merged_bundle(
         "com.app",
@@ -411,7 +425,9 @@ def test_build_merged_bundle_uses_first_devices_base_apk_and_metadata(tmp_path):
     )
     with zipfile.ZipFile(target) as zf:
         meta = json.loads(zf.read("meta.sai_v2.json"))
-    assert meta["label"] == "App A"  # dev-a sorts first, its metadata wins
+    # dev-a sorts first, so its base apk's real content wins
+    assert meta["label"] == "Polite Droid"
+    assert meta["package"] == "com.politedroid"
 
 
 def test_build_merged_bundle_unions_obbs_from_multiple_devices_without_duplicate_copy(
@@ -635,7 +651,7 @@ def test_zip_format_uses_zip_extension_same_contents(tmp_path):
         assert "meta.sai_v2.json" in zf.namelist()
 
 
-def test_folder_format_extracts_loose_files(tmp_path):
+def test_folder_format_extracts_loose_files(tmp_path, force_splits):
     pm_path = (
         "package:/data/app/com.app-x/base.apk\n"
         "package:/data/app/com.app-x/split_config.en.apk\n"
@@ -647,6 +663,7 @@ def test_folder_format_extracts_loose_files(tmp_path):
     with (
         _patched_apk_file(version_code=41),
         patch("apkpull.puller.verify_bundle", return_value=(True, manifest)),
+        force_splits(where=lambda p: p.name != "base.apk"),
     ):
         _, files, _, _ = pull_and_build(
             puller, "com.app", output_format=OutputFormat.FOLDER

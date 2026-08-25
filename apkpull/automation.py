@@ -112,7 +112,7 @@ class PlayStoreAutomator:
         )
         self.launch(package)
 
-        install_coords, _dump = self._wait_for_button(
+        install_coords, _nodes = self._wait_for_button(
             package,
             button_text=b.install,
             also_break_on=(b.cancel,),
@@ -138,7 +138,7 @@ class PlayStoreAutomator:
         self.launch(package)
 
         try:
-            update_coords, dump = self._wait_for_button(
+            update_coords, nodes = self._wait_for_button(
                 package,
                 button_text=b.update,
                 also_break_on=(b.cancel, b.open, b.play, b.uninstall, b.deactivate),
@@ -155,7 +155,7 @@ class PlayStoreAutomator:
         # either "already up to date" (Open/Play/Uninstall visible, no Update
         # button) or "already updating" (Cancel visible). Only the latter should
         # fall through to tracking the update.
-        if update_coords is None and not uidump.contains_text(dump, b.cancel):
+        if update_coords is None and not uidump.contains_text(nodes, b.cancel):
             logger.info("[%s] %s is already up to date.", self.device.label, package)
             return KickoffResult(needs_tracking=False, status=Status.ALREADY_UP_TO_DATE)
 
@@ -178,50 +178,58 @@ class PlayStoreAutomator:
 
     # -- internals --------------------------------------------------------------
 
-    def _check_error_screens(self, dump: str) -> None:
+    def _check_error_screens(self, nodes: list[uidump.UiNode]) -> None:
+        """``nodes`` is one dump parsed once by the caller (``_wait_for_button``/
+        ``_tap_until_download_starts``) — every check below queries that same
+        parsed list rather than re-scanning the raw XML itself, since a single
+        poll tick used to trigger up to a dozen-plus independent re-parses of
+        the same dump here."""
         b = self.buttons
-        if b.not_found and uidump.contains_text(dump, b.not_found):
+        if b.not_found and uidump.contains_text(nodes, b.not_found):
             raise AppNotFoundError(b.not_found)
         if b.insufficient_storage and uidump.contains_text(
-            dump, b.insufficient_storage
+            nodes, b.insufficient_storage
         ):
             raise InsufficientStorageError(b.insufficient_storage)
-        if uidump.contains_text(dump, b.hardware_incompatible):
+        if uidump.contains_text(nodes, b.hardware_incompatible):
             raise IncompatibleDeviceError(b.hardware_incompatible)
-        if uidump.contains_text(dump, b.country_restricted):
+        if uidump.contains_text(nodes, b.country_restricted):
             raise RegionRestrictedError(b.country_restricted)
-        if uidump.contains_text(dump, b.offline):
+        if uidump.contains_text(nodes, b.offline):
             raise DeviceOfflineError(f"{b.offline}.")
-        if b.no_internet_dialog and uidump.contains_text(dump, b.no_internet_dialog):
+        if b.no_internet_dialog and uidump.contains_text(nodes, b.no_internet_dialog):
             raise DeviceOfflineError(b.no_internet_dialog)
-        if uidump.contains_any_currency_amount(dump, PAID_APP_CURRENCY_SYMBOLS):
+        if uidump.contains_any_currency_amount(nodes, PAID_APP_CURRENCY_SYMBOLS):
             raise PaidAppError("This app is paid.")
-        if b.sign_in and uidump.contains_text(dump, b.sign_in):
+        if b.sign_in and uidump.contains_text(nodes, b.sign_in):
             raise NotSignedInError("You must be logged in to a Google account.")
         if b.warning_icon:
-            message = uidump.find_text_near_content_desc(dump, b.warning_icon)
+            message = uidump.find_text_near_content_desc(nodes, b.warning_icon)
             if message:
                 raise UnrecognizedPlayStoreError(f"Google Play showed: {message!r}")
 
     def _wait_for_button(
         self, package: str, *, button_text: str, also_break_on: tuple[str, ...]
-    ) -> tuple[tuple[int, int] | None, str]:
+    ) -> tuple[tuple[int, int] | None, list[uidump.UiNode]]:
         """Poll until ``button_text`` (or any text in ``also_break_on``) appears.
 
-        Returns ``(coords, dump)`` — ``coords`` is ``None`` when the match was
-        one of ``also_break_on`` rather than the target button itself.
+        Returns ``(coords, nodes)`` — ``coords`` is ``None`` when the match was
+        one of ``also_break_on`` rather than the target button itself; ``nodes``
+        is the winning poll's dump, already parsed once, for the caller to
+        query further without re-parsing.
         """
         rounds = 0
         while True:
             self.device.ensure_connected()
             dump = self.device.dump_ui()
-            self._check_error_screens(dump)
+            nodes = uidump.parse(dump)
+            self._check_error_screens(nodes)
 
-            coords = uidump.find_button(dump, button_text)
+            coords = uidump.find_button(nodes, button_text)
             if coords is not None:
-                return coords, dump
-            if any(uidump.contains_text(dump, t) for t in also_break_on):
-                return None, dump
+                return coords, nodes
+            if any(uidump.contains_text(nodes, t) for t in also_break_on):
+                return None, nodes
 
             if not self.device.is_foreground_package(GOOGLE_PLAY_PACKAGE):
                 logger.info("[%s] Left Google Play, relaunching...", self.device.label)
@@ -250,7 +258,7 @@ class PlayStoreAutomator:
         """
         self.device.ensure_connected()
         self.device.tap(*coords)
-        self._check_error_screens(self.device.dump_ui())
+        self._check_error_screens(uidump.parse(self.device.dump_ui()))
         if not self.device.is_foreground_package(GOOGLE_PLAY_PACKAGE):
             logger.info("[%s] Left Google Play, relaunching...", self.device.label)
             self.launch(package)
@@ -259,8 +267,14 @@ class PlayStoreAutomator:
         self.config.logs_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
         info = self.device.info()
-        base = self.config.logs_dir / f"{stamp}_{info.model}_{info.lang}".replace(
-            " ", "_"
+        # device_id in the filename (not just model/lang) since two devices
+        # erroring in the same second with the same model+lang -- exactly the
+        # "duplicate-looking devices" scenario apkpull itself warns about --
+        # would otherwise silently overwrite each other's diagnostic files.
+        base = self.config.logs_dir / (
+            f"{stamp}_{info.model}_{info.lang}_{self.device.device_id}".replace(
+                " ", "_"
+            ).replace(":", "_")
         )
         dump_path = base.with_suffix(".xml")
         screenshot_path = base.with_suffix(".png")

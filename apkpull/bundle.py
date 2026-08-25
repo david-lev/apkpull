@@ -11,9 +11,7 @@ by apkfile itself, by SAI on another Android device, or by any zip tool.
 from __future__ import annotations
 
 import enum
-import json
 import logging
-import zipfile
 from pathlib import Path
 
 from apkfile import ApksFile, InvalidApkError, InvalidBundleError
@@ -31,14 +29,11 @@ def build_apks_bundle(
     base_path: Path,
     split_paths: list[Path],
     dest_path: Path,
-    package: str,
-    version_code: int,
-    version_name: str | None,
-    app_name: str,
-    min_sdk_version: int | None,
-    target_sdk_version: int | None,
 ) -> None:
-    """Zip ``base_path`` + ``split_paths`` into a SAI-format ``.apks`` file at ``dest_path``.
+    """Build a SAI-format ``.apks`` file at ``dest_path`` from ``base_path`` + ``split_paths``.
+
+    Delegates to ``apkfile.ApksFile.create``, which re-parses ``base_path`` to derive the
+    ``meta.sai_v2.json`` manifest (package, label, version_code, version_name, min/target sdk).
 
     Written to a ``.tmp`` sibling first and atomically renamed into place, so
     a crash or interrupt mid-write can never leave a half-written file at
@@ -46,23 +41,9 @@ def build_apks_bundle(
     """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dest_path.with_name(dest_path.name + ".tmp")
-    meta = {
-        "package": package,
-        "label": app_name,
-        "version_code": version_code,
-        "meta_version": 2,
-        **({"version_name": version_name} if version_name else {}),
-        **({"min_sdk": min_sdk_version} if min_sdk_version is not None else {}),
-        **(
-            {"target_sdk": target_sdk_version} if target_sdk_version is not None else {}
-        ),
-    }
     try:
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(base_path, arcname=BASE_NAME)
-            for split_path in split_paths:
-                zf.write(split_path, arcname=split_path.name)
-            zf.writestr(META_NAME, json.dumps(meta))
+        built = ApksFile.create([base_path, *split_paths], tmp_path)
+        built._zip.close()  # release the handle before the rename below (Windows can't rename an open file)
         tmp_path.replace(dest_path)
     finally:
         tmp_path.unlink(missing_ok=True)

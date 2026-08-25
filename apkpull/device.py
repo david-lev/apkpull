@@ -78,6 +78,14 @@ class Device:
 
     # -- identity -----------------------------------------------------------
 
+    def seed_info(self, info: DeviceInfo) -> None:
+        """Pre-populate the cached :meth:`info` result from an already-resolved
+        lookup done elsewhere (e.g. the duplicate-device check in
+        ``orchestrator.py``), so a later :meth:`info` call on this instance
+        returns it directly instead of redundantly re-issuing the same
+        ``getprop``/locale round trip for the same device within one run."""
+        self._info = info
+
     def info(self, *, refresh: bool = False) -> DeviceInfo:
         if self._info is not None and not refresh:
             return self._info
@@ -227,10 +235,18 @@ class Device:
         )
 
     def dump_ui(self) -> str:
-        self.adb.shell(self.device_id, "rm -f /sdcard/window_dump.xml", check=False)
-        self.adb.shell(self.device_id, "uiautomator dump", check=False, timeout=15)
+        # One combined shell round-trip instead of three separate adb subprocess
+        # calls (rm, dump, cat) -- this is the single most-executed adb sequence
+        # in the whole tool (runs on every automation poll, for every device),
+        # so cutting adb subprocess overhead here matters a lot in aggregate.
+        # `uiautomator dump`'s own stdout ("UI hierarchy dumped to: ...") is
+        # redirected away so only `cat`'s output comes back.
         return self.adb.shell(
-            self.device_id, "cat /sdcard/window_dump.xml", check=False
+            self.device_id,
+            "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+            "cat /sdcard/window_dump.xml",
+            check=False,
+            timeout=15,
         )
 
     # -- app-scoped locale (Android 13+ / API 33+) ---------------------------

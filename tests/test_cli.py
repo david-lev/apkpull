@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from apkpull.cli import build_parser, main
@@ -84,7 +85,7 @@ def test_parser_parses_all_flags():
             "-vv",
         ]
     )
-    assert str(args.dest) == "/tmp/out"
+    assert args.dest == Path("/tmp/out")
     assert args.uninstall_after is True
     assert args.devices == "a,b"
     assert args.max_workers == 2

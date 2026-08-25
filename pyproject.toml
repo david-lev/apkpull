@@ -31,7 +31,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "apkfile>=1.4.0",
+    "apkfile>=1.4.1",
     "rich>=13.0",
 ]
 

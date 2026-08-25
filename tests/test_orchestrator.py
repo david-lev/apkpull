@@ -1,5 +1,6 @@
 import urllib.error
 import zipfile
+from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,8 +14,10 @@ from apkpull.exceptions import (
 )
 from apkpull.models import DeviceInfo, DeviceOutcome, OutputFormat, Status
 from apkpull.orchestrator import (
+    _drain_batch,
     _merge_pending_contributions,
     _PendingContribution,
+    _warn_about_duplicate_devices,
     check_package_exists,
     run,
     run_for_device,
@@ -23,7 +26,13 @@ from apkpull.orchestrator import (
 from apkpull.progress import ProgressEvent, Stage
 from apkpull.puller import RawPull, target_path
 
-from .helpers import FakeAdb, make_dump
+from .helpers import (
+    POLITEDROID_BYTES,
+    TEST_DEBUG_BYTES,
+    FakeAdb,
+    configure_apks_create,
+    make_dump,
+)
 
 OPEN = make_dump(("Open", (0, 0, 100, 50)))
 
@@ -58,21 +67,25 @@ def _run_for_device_and_merge(adb, device_id, packages, dest_root, **kwargs):
     return outcomes
 
 
-def _make_contribution(
-    tmp_path, device_id, package, version_code, *, splits, label=None
-):
+def _make_contribution(tmp_path, device_id, package, version_code, *, splits):
     """Build a (_PendingContribution) directly, bypassing FakeAdb/
     Puller.pull_raw -- these are for run()-level tests exercising the
     merge-phase *wiring* (grouping, warnings, staging cleanup), not the
-    device-pull mechanics themselves (already covered in test_puller.py)."""
+    device-pull mechanics themselves (already covered in test_puller.py).
+
+    base_path/split_paths get real fixture apk bytes (not literal placeholder
+    text) since the merge phase feeds them into a real ApksFile.create() call
+    -- callers wrap the eventual run()/build_merged_bundle() call in
+    force_splits(where=...) so these split filenames are actually treated as
+    splits rather than competing base apks."""
     staging = tmp_path / ".apkpull-staging" / f"{package}-{version_code}" / device_id
     staging.mkdir(parents=True)
     base_path = staging / "base.apk"
-    base_path.write_bytes(b"BASE")
+    base_path.write_bytes(POLITEDROID_BYTES)
     split_paths = []
     for name in splits:
         split_path = staging / name
-        split_path.write_bytes(f"SPLIT-{device_id}-{name}".encode())
+        split_path.write_bytes(TEST_DEBUG_BYTES)
         split_paths.append(split_path)
     target = target_path(tmp_path, package, version_code, OutputFormat.APKS)
     raw = RawPull(
@@ -82,11 +95,6 @@ def _make_contribution(
         version_name="1.0",
         target=target,
         already_built=False,
-        app_name=label or "App",
-        apk_version_code=version_code,
-        apk_version_name="1.0",
-        min_sdk_version=21,
-        target_sdk_version=34,
         base_path=base_path,
         split_paths=split_paths,
         obb_paths=[],
@@ -275,7 +283,10 @@ def test_run_for_device_reports_error_per_package_when_setup_fails():
 
 def test_run_for_device_pulls_and_verifies_already_up_to_date_app(tmp_path):
     adb = _adb_with_device(pkg_pm_path="package:/data/app/com.app-x/base.apk\n")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [OPEN]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [OPEN]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
 
     # Puller parses the pulled base apk with ApkFile before zipping it into a bundle, and
@@ -298,6 +309,7 @@ def test_run_for_device_pulls_and_verifies_already_up_to_date_app(tmp_path):
             "version_code": 5,
         }
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(adb, "fake-1", ["com.app"], tmp_path)
 
@@ -313,7 +325,10 @@ def test_run_for_device_pulls_and_verifies_already_up_to_date_app(tmp_path):
 
 def test_run_for_device_reports_progress_through_the_full_pipeline(tmp_path):
     adb = _adb_with_device(pkg_pm_path="package:/data/app/com.app-x/base.apk\n")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [OPEN]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [OPEN]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
 
     events: list[ProgressEvent] = []
@@ -331,6 +346,7 @@ def test_run_for_device_reports_progress_through_the_full_pipeline(tmp_path):
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         _run_for_device_and_merge(
             adb, "fake-1", ["com.app"], tmp_path, on_progress=events.append
@@ -377,6 +393,7 @@ def test_run_for_device_skips_play_store_entirely_when_skip_update_check(tmp_pat
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(
             adb, "fake-1", ["com.app"], tmp_path, skip_update_check=True
@@ -392,7 +409,10 @@ def test_run_for_device_skips_play_store_entirely_when_skip_update_check(tmp_pat
 
 def test_run_for_device_forwards_output_format_to_puller(tmp_path):
     adb = _adb_with_device(pkg_pm_path="package:/data/app/com.app-x/base.apk\n")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [OPEN]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [OPEN]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
 
     with (
@@ -408,6 +428,7 @@ def test_run_for_device_forwards_output_format_to_puller(tmp_path):
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(
             adb, "fake-1", ["com.app"], tmp_path, output_format=OutputFormat.ZIP
@@ -423,7 +444,10 @@ def test_run_for_device_handles_multiple_packages_on_one_device(tmp_path):
     adb.shell_responses["pm path com.other"] = (
         "package:/data/app/com.other-x/base.apk\n"
     )
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [OPEN]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [OPEN]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
     adb.shell_responses["dumpsys package com.other"] = "versionCode=9 versionName=2.0"
 
@@ -440,6 +464,7 @@ def test_run_for_device_handles_multiple_packages_on_one_device(tmp_path):
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(
             adb, "fake-1", ["com.app", "com.other"], tmp_path
@@ -476,9 +501,10 @@ def test_run_for_device_distinguishes_downloading_from_updating():
     """DOWNLOADING's detail must say which is actually happening -- an update
     in progress looks nothing like a fresh install to someone watching."""
     adb = _adb_with_device(pkg_pm_path="package:/data/app/com.app-x/base.apk\n")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [
-        make_dump(("Update", (0, 0, 100, 50)))
-    ]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [make_dump(("Update", (0, 0, 100, 50)))]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
     events: list[ProgressEvent] = []
 
@@ -506,9 +532,10 @@ def test_run_for_device_restores_stay_on_setting_even_when_automation_fails():
     a `finally`, even when automation raises (e.g. a paid-app screen)."""
     adb = _adb_with_device(pkg_pm_path="")  # not installed -> takes the install path
     adb.shell_responses["settings get global stay_on_while_plugged_in"] = "3\n"
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [
-        make_dump(("$4.99", (0, 0, 10, 10)))
-    ]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [make_dump(("$4.99", (0, 0, 10, 10)))]
 
     outcomes, _pending = run_for_device(adb, "fake-1", ["com.app"], None)
 
@@ -519,7 +546,10 @@ def test_run_for_device_restores_stay_on_setting_even_when_automation_fails():
 
 def test_run_for_device_skips_stay_on_setting_when_keep_screen_on_false(tmp_path):
     adb = _adb_with_device(pkg_pm_path="package:/data/app/com.app-x/base.apk\n")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [OPEN]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [OPEN]
     adb.shell_responses["dumpsys package com.app"] = "versionCode=5 versionName=1.0"
 
     with (
@@ -535,6 +565,7 @@ def test_run_for_device_skips_stay_on_setting_when_keep_screen_on_false(tmp_path
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(
             adb, "fake-1", ["com.app"], tmp_path, keep_screen_on=False
@@ -551,7 +582,10 @@ def test_run_for_device_reports_timeout_when_download_never_finishes():
     """No retries left: a download that never completes must be reported as an
     error instead of polling forever."""
     adb = _adb_with_device(pkg_pm_path="")  # never becomes installed
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [INSTALL]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [INSTALL]
 
     outcomes, _pending = run_for_device(
         adb,
@@ -572,7 +606,10 @@ def test_run_for_device_retries_download_after_timeout_then_succeeds(tmp_path):
     """One retry left: a timed-out download restarts the kickoff flow and
     succeeds once the retry's install actually finishes."""
     adb = _adb_with_device(pkg_pm_path="")
-    adb.shell_responses["cat /sdcard/window_dump.xml"] = [INSTALL, INSTALL]
+    adb.shell_responses[
+        "rm -f /sdcard/window_dump.xml; uiautomator dump >/dev/null 2>&1; "
+        "cat /sdcard/window_dump.xml"
+    ] = [INSTALL, INSTALL]
     # is_installed() is polled 4 times before it finally succeeds: once during
     # the initial kickoff, once right after the initial tap, once in the
     # completion pass (times out), and once right after the retry's tap.
@@ -598,6 +635,7 @@ def test_run_for_device_retries_download_after_timeout_then_succeeds(tmp_path):
         apks_ctor.return_value.version_code = 5
         apks_ctor.return_value.as_dict.return_value = {}
         apks_ctor.return_value.splits = []
+        configure_apks_create(apks_ctor)
 
         outcomes = _run_for_device_and_merge(
             adb,
@@ -1004,7 +1042,9 @@ def test_run_respects_explicit_device_ids():
 # -- cross-device merge (run()'s post-drain _merge_pending_contributions) --------------------
 
 
-def test_run_merges_distinct_splits_from_two_devices_into_one_bundle(tmp_path):
+def test_run_merges_distinct_splits_from_two_devices_into_one_bundle(
+    tmp_path, force_splits
+):
     """The primary end-to-end regression test: two devices with genuinely
     different splits (arm64/en vs x86_64/he) must both end up in the final
     bundle, not just whichever device's thread finished first."""
@@ -1035,6 +1075,7 @@ def test_run_merges_distinct_splits_from_two_devices_into_one_bundle(tmp_path):
     with (
         patch("apkpull.orchestrator.AdbClient") as adb_ctor,
         patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
+        force_splits(where=lambda p: p.name != "base.apk"),
     ):
         adb_ctor.return_value.list_devices.return_value = ["dev-a", "dev-b"]
         run_for_device_mock.side_effect = side_effect
@@ -1084,7 +1125,7 @@ def test_run_forwards_full_manifest_to_build_merged_bundle(tmp_path):
 
 
 def test_run_builds_separate_bundles_for_devices_reporting_different_version_codes(
-    tmp_path, caplog
+    tmp_path, caplog, force_splits
 ):
     def side_effect(adb, device_id, packages, dest_root, **kwargs):
         if device_id == "dev-a":
@@ -1101,6 +1142,7 @@ def test_run_builds_separate_bundles_for_devices_reporting_different_version_cod
         patch("apkpull.orchestrator.AdbClient") as adb_ctor,
         patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
         caplog.at_level("WARNING", logger="apkpull.orchestrator"),
+        force_splits(where=lambda p: p.name != "base.apk"),
     ):
         adb_ctor.return_value.list_devices.return_value = ["dev-a", "dev-b"]
         run_for_device_mock.side_effect = side_effect
@@ -1118,7 +1160,9 @@ def test_run_builds_separate_bundles_for_devices_reporting_different_version_cod
     assert any("different version codes" in w for w in warnings)
 
 
-def test_run_warns_and_still_merges_when_one_of_three_devices_fails(tmp_path, caplog):
+def test_run_warns_and_still_merges_when_one_of_three_devices_fails(
+    tmp_path, caplog, force_splits
+):
     def side_effect(adb, device_id, packages, dest_root, **kwargs):
         if device_id == "dev-a":
             c = _make_contribution(
@@ -1142,6 +1186,7 @@ def test_run_warns_and_still_merges_when_one_of_three_devices_fails(tmp_path, ca
         patch("apkpull.orchestrator.AdbClient") as adb_ctor,
         patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
         caplog.at_level("WARNING", logger="apkpull.orchestrator"),
+        force_splits(where=lambda p: p.name != "base.apk"),
     ):
         adb_ctor.return_value.list_devices.return_value = ["dev-a", "dev-b", "dev-c"]
         run_for_device_mock.side_effect = side_effect
@@ -1197,7 +1242,9 @@ def test_run_marks_all_contributing_devices_error_when_merge_itself_fails(tmp_pa
     assert all("own install/update succeeded" in o.error for o in summary.outcomes)
 
 
-def test_run_cleans_up_group_staging_directory_after_a_successful_merge(tmp_path):
+def test_run_cleans_up_group_staging_directory_after_a_successful_merge(
+    tmp_path, force_splits
+):
     def side_effect(adb, device_id, packages, dest_root, **kwargs):
         c = _make_contribution(
             dest_root, "dev-a", "com.app", 100, splits=["config.en.apk"]
@@ -1207,6 +1254,7 @@ def test_run_cleans_up_group_staging_directory_after_a_successful_merge(tmp_path
     with (
         patch("apkpull.orchestrator.AdbClient") as adb_ctor,
         patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
+        force_splits(where=lambda p: p.name != "base.apk"),
     ):
         adb_ctor.return_value.list_devices.return_value = ["dev-a"]
         run_for_device_mock.side_effect = side_effect
@@ -1252,3 +1300,114 @@ def test_run_removes_stale_staging_directory_left_by_a_previous_crashed_run_at_s
         run("com.app", tmp_path, skip_existence_check=True)
 
     assert not (tmp_path / ".apkpull-staging").exists()
+
+
+# -- device-info reuse / unexpected-exception handling ----------------------
+
+
+def test_warn_about_duplicate_devices_returns_resolved_infos_by_device_id():
+    infos = {
+        "dev-1": DeviceInfo(device_id="dev-1", model="Pixel A"),
+        "dev-2": DeviceInfo(device_id="dev-2", model="Pixel B"),
+    }
+
+    class _FakeDevice:
+        def __init__(self, adb, device_id):
+            self.device_id = device_id
+
+        def ensure_connected(self):
+            pass
+
+        def info(self):
+            return infos[self.device_id]
+
+    with patch("apkpull.orchestrator.Device", _FakeDevice):
+        result = _warn_about_duplicate_devices(MagicMock(), ["dev-1", "dev-2"])
+
+    assert result == infos
+
+
+def test_run_passes_resolved_device_info_to_run_for_device_avoiding_a_second_fetch():
+    """The duplicate-device check (run before the thread pool starts) already
+    resolved each device's info -- run() should hand that straight to
+    run_for_device instead of letting it redundantly re-fetch the same
+    getprop/locale round trip a second time for the same device."""
+    infos = {
+        "dev-1": DeviceInfo(device_id="dev-1", model="Pixel A", abi="arm64-v8a"),
+        "dev-2": DeviceInfo(device_id="dev-2", model="Pixel B", abi="x86_64"),
+    }
+
+    class _FakeDevice:
+        def __init__(self, adb, device_id):
+            self.device_id = device_id
+
+        def ensure_connected(self):
+            pass
+
+        def info(self):
+            return infos[self.device_id]
+
+    with (
+        patch("apkpull.orchestrator.AdbClient") as adb_ctor,
+        patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
+        patch("apkpull.orchestrator.Device", _FakeDevice),
+    ):
+        adb_ctor.return_value.list_devices.return_value = list(infos)
+        run_for_device_mock.return_value = ([], [])
+        run("com.app", None, skip_existence_check=True)
+
+    seen = {
+        call.args[1]: call.kwargs["device_info"]
+        for call in run_for_device_mock.call_args_list
+    }
+    assert seen == infos
+
+
+def test_run_propagates_unexpected_exception_from_run_for_device():
+    """A genuine bug in run_for_device (not a per-device DeviceError, which it
+    already turns into a normal error outcome rather than raising) must still
+    surface loudly instead of being silently swallowed."""
+    with (
+        patch("apkpull.orchestrator.AdbClient") as adb_ctor,
+        patch("apkpull.orchestrator.run_for_device") as run_for_device_mock,
+    ):
+        adb_ctor.return_value.list_devices.return_value = ["dev-1"]
+        run_for_device_mock.side_effect = RuntimeError("unexpected bug")
+        with pytest.raises(RuntimeError, match="unexpected bug"):
+            run("com.app", None, skip_existence_check=True, skip_duplicate_check=True)
+
+
+def test_drain_batch_collects_all_successes_even_when_one_future_raises():
+    """`done` from concurrent.futures.wait() is an unordered set -- an
+    unexpected exception from one device's future must not prevent a
+    sibling's already-computed result, sitting in the same batch, from being
+    collected."""
+    outcome = DeviceOutcome(
+        device=DeviceInfo(device_id="dev-1"),
+        package="com.app",
+        status=Status.INSTALLED,
+    )
+    good: Future = Future()
+    good.set_result(([outcome], []))
+    bad: Future = Future()
+    bad.set_exception(RuntimeError("boom"))
+
+    outcomes: list = []
+    contributions: list = []
+    exceptions = _drain_batch({good, bad}, outcomes, contributions)
+
+    assert outcomes == [outcome]
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], RuntimeError)
+
+
+def test_drain_batch_skips_cancelled_futures_without_reporting_them_as_errors():
+    cancelled: Future = Future()
+    cancelled.cancel()
+
+    outcomes: list = []
+    contributions: list = []
+    exceptions = _drain_batch({cancelled}, outcomes, contributions)
+
+    assert outcomes == []
+    assert exceptions == []

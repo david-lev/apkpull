@@ -50,16 +50,16 @@ wheels = [
 
 [[package]]
 name = "apkfile"
-version = "1.4.0"
+version = "1.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "androguard" },
     { name = "cryptography" },
     { name = "loguru" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/a0/69e208c949b7d1c9f1e0f7c27ef98eb174b8ec4b1c77492d6716850ffb49/apkfile-1.4.0.tar.gz", hash = "sha256:03e51450939964c335b4d10c1f37b085e97bab019e51956448d902fae3067bc4", size = 51932, upload-time = "2026-08-25T11:37:29.827Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/35/ec4bd205fafacf37acc6fa94b3c07498db319a887b8009dd6af0b6fedcf5/apkfile-1.4.1.tar.gz", hash = "sha256:9f025453c9c856f3e4fdd1bc5249d55312a01daa80cf6b64624a9fe6a17a8798", size = 52476, upload-time = "2026-08-25T17:26:19.105Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/e3/a65ce5f76bc0b1f09f86de71747d0132d3885d7868b97153ab79a7ec4752/apkfile-1.4.0-py3-none-any.whl", hash = "sha256:fbff6ae9212acc41caad70e1f8fae8fa11a64773166f5e52e5e36699bcbaa418", size = 61639, upload-time = "2026-08-25T11:37:28.886Z" },
+    { url = "https://files.pythonhosted.org/packages/30/5a/1fd5fa4aa249138619098ac360475d9ef57cf2bccccbda515679b7f78ecc/apkfile-1.4.1-py3-none-any.whl", hash = "sha256:b2c49ba8180c1465a63c843f0208c8746596c3178fd1cc93ebed8699678d5a73", size = 62171, upload-time = "2026-08-25T17:26:17.968Z" },
 ]
 
 [[package]]
@@ -92,7 +92,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apkfile", specifier = ">=1.4.0" },
+    { name = "apkfile", specifier = ">=1.4.1" },
     { name = "rich", specifier = ">=13.0" },
 ]
 

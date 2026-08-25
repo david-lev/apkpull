@@ -156,16 +156,6 @@ class RawPull:
     """``True``: ``target`` already existed before this pull (from an
     earlier, separate apkpull invocation); nothing below is populated
     except ``obb_pulled_files``."""
-    app_name: str = ""
-    apk_version_code: int = 0
-    """``ApkFile(base_local).version_code`` — for the bundle's
-    ``meta.sai_v2.json``. Usually equal to ``version_code`` above but kept
-    distinct on purpose (one comes from ``dumpsys``, the other from parsing
-    the pulled apk itself) — an existing distinction, not incidental
-    duplication."""
-    apk_version_name: str | None = None
-    min_sdk_version: int | None = None
-    target_sdk_version: int | None = None
     base_path: Path | None = None
     split_paths: list[Path] = field(default_factory=list)
     obb_paths: list[Path] = field(default_factory=list)
@@ -249,13 +239,9 @@ class Puller:
         )
 
         try:
-            base_apk = ApkFile(base_local)
+            ApkFile(base_local)
         except InvalidApkError as exc:
             raise PullError(f"Pulled base apk for {package} is invalid: {exc}") from exc
-
-        app_name = base_apk.labels.get("") or next(
-            iter(base_apk.labels.values()), package
-        )
 
         obb_paths: list[Path] = []
         for obb_name in obb_names(package, version_code):
@@ -278,11 +264,6 @@ class Puller:
             version_name=version_name,
             target=target,
             already_built=False,
-            app_name=app_name,
-            apk_version_code=base_apk.version_code,
-            apk_version_name=base_apk.version_name,
-            min_sdk_version=base_apk.min_sdk_version,
-            target_sdk_version=base_apk.target_sdk_version,
             base_path=base_local,
             split_paths=split_locals,
             obb_paths=obb_paths,
@@ -465,19 +446,13 @@ def build_merged_bundle(
     with tempfile.TemporaryDirectory(prefix="apkpull-merge-") as tmp:
         zip_path = Path(tmp) / "bundle.apks"
         logger.info("Packaging %s from %d device(s)...", package, len(contributions))
+        # Base.apk isn't device-split — Play Store serves one canonical build per
+        # version_code — so no cross-device reconciliation is needed here; the manifest
+        # fields (package, version_code, ...) are derived from `primary.base_path` alone.
         build_apks_bundle(
             base_path=primary.base_path,
             split_paths=split_paths,
             dest_path=zip_path,
-            package=package,
-            # Base.apk isn't device-split — Play Store serves one canonical
-            # build per version_code — so no cross-device reconciliation is
-            # attempted for any of these; they all come from `primary` only.
-            version_code=primary.apk_version_code,
-            version_name=primary.apk_version_name,
-            app_name=primary.app_name,
-            min_sdk_version=primary.min_sdk_version,
-            target_sdk_version=primary.target_sdk_version,
         )
 
         verified = None
