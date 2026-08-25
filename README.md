@@ -1,4 +1,7 @@
-<h2 align="center">📱 <a href="https://github.com/david-lev/apkpull">apkpull</a> • Download Android apps from Google Play as one installable bundle</h2>
+<h2 align="center">
+  <img src="https://raw.githubusercontent.com/david-lev/apkpull/main/assets/logo.svg" width="40" height="40" alt="apkpull logo"/>
+  <a href="https://github.com/david-lev/apkpull">apkpull</a> • Download Android apps from Google Play as one installable bundle
+</h2>
 
 <p align="center">
   <a href="https://pypi.org/project/apkpull/"><img src="https://img.shields.io/pypi/v/apkpull?color=%2334D058&label=pypi" alt="PyPI Version"/></a>
@@ -18,7 +21,6 @@ into a single artifact anyone can install, whatever their phone's CPU, screen, o
 ```bash
 apkpull com.whatsapp                                        # pull one app from every connected device
 apkpull com.whatsapp,com.spotify.music -d ~/Apps            # pull several apps, into a custom folder
-apkpull com.whatsapp --devices emulator-5554,emulator-5556  # merge splits from two devices into one bundle
 ```
 
 ## Install

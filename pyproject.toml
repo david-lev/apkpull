@@ -8,7 +8,7 @@ module-root = ""
 
 [project]
 name = "apkpull"
-version = "2.0.0"
+version = "1.0.0"
 description = "Automate downloading (pulling) Android apps from Google Play, across multiple real/emulated devices at once."
 readme = "README.md"
 license = "MIT"
