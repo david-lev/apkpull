@@ -10,13 +10,13 @@
 e='\e[0m'; r='\e[31m'; g='\e[32m'
 y='\e[33m'; b='\e[34m'; p='\e[35m'
 echo -e "
-$g  ___  ______ _   __            _ _ 
+$g  ___  ______ _   __            _ _
 $y / _ \ | ___ \ | / /           | | |
 $b/ /_\ \| |_/ / |/ / _ __  _   _| | |
 $r|  _  ||  __/|    \| '_ \| | | | | |
 $p| | | || |   | |\  \ |_) | |_| | | |
 $g\_| |_/\_|   \_| \_/ .__/ \__,_|_|_|
-$b                   | |              
+$b                   | |
 $y APK's puller tool $b|_|$y By david-lev$e
 "
 ### VARS & FUNCS ###
@@ -209,7 +209,7 @@ for device_id in ${devices[@]}; do
                 fi
             else
                 print ${y} "The device language ${g}(${device_lang:0:2})${y} is not supported by apkpull to check for updates." ${ntf}
-            fi 
+            fi
         fi
 
         ### PULL ###
